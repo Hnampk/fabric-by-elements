@@ -2,15 +2,16 @@ package main
 
 import (
 	"fmt"
+
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/resmgmt"
 	"github.com/hyperledger/fabric-sdk-go/pkg/core/config"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
-	"github.com/hyperledger/fabric-sdk-go/pkg/client/resmgmt"
+
 	// mspclient "github.com/hyperledger/fabric-sdk-go/pkg/client/msp"
 	//  "github.com/hyperledger/fabric-sdk-go/pkg/fab"
 	// fabpeer "github.com/hyperledger/fabric-sdk-go/pkg/fab/peer"
-	packager "github.com/hyperledger/fabric-sdk-go/pkg/fab/ccpackager/gopackager"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/errors/retry"
-
+	packager "github.com/hyperledger/fabric-sdk-go/pkg/fab/ccpackager/gopackager"
 )
 
 func main() {
@@ -18,10 +19,10 @@ func main() {
 	// Create SDK setup for the integration tests
 	configFile := "network.yaml"
 	configProvider := config.FromFile(configFile)
-  sdk, err1 := fabsdk.New(configProvider)
+	sdk, err1 := fabsdk.New(configProvider)
 	if err1 != nil {
-			fmt.Println("failed to create sdk",err1)
-			return
+		fmt.Println("failed to create sdk", err1)
+		return
 	}
 	defer sdk.Close()
 
@@ -30,12 +31,11 @@ func main() {
 	OrgName := "org1"
 	resourceManagerClientContext := sdk.Context(fabsdk.WithUser(OrgAdmin), fabsdk.WithOrg(OrgName))
 
-
 	fmt.Println("3. Create a resource client instance using its New func, passing the context.")
 	// Create new resource management client
 	resMgmtClient, err := resmgmt.New(resourceManagerClientContext)
 	if err != nil {
-	    fmt.Println("failed to create resource client: ", err)
+		fmt.Println("failed to create resource client: ", err)
 	}
 
 	// fmt.Println("3.1 Create a msp client instance using its New func, passing the context.")
@@ -54,7 +54,7 @@ func main() {
 	// fmt.Println(adminIdentity.Identifier().ID)
 	// fmt.Println(adminIdentity.Identifier().MSPID)
 
-// Try to get genesis
+	// Try to get genesis
 	// cfgBackend, err := sdk.Config()
 	// if err != nil {
 	// 		fmt.Printf("failed to get config backend: %s\n", err)
@@ -65,7 +65,7 @@ func main() {
 	// }
 
 	// serverName := "peer0.org1.example.com"
-  // peerURL := "grpcs://peer0.org1.example.com:7051"
+	// peerURL := "grpcs://peer0.org1.example.com:7051"
 
 	// serverName := "peer1.org1.example.com"
 	// peerURL := "grpcs://peer1.org1.example.com:7056"
@@ -75,25 +75,26 @@ func main() {
 	// 		return
 	// }
 
-	chaincodeGoPath := "/Users/nguyenthanhbinh/Blockchain/test/hyperledger/fabric-samples/balance-transfer/artifacts"
-	chaincodePath := "vnpay.vn/bilateralchannel"
+	// chaincodeGoPath := "/Users/nguyenthanhbinh/Blockchain/test/hyperledger/fabric-samples/balance-transfer/artifacts"
+	chaincodeGoPath := "../chaincode/abstore"
+	chaincodePath := "go"
 
- 	// Create the chaincode package that will be sent to the peers
- 	ccPkg, err := packager.NewCCPackage(chaincodePath, chaincodeGoPath)
- 	if err != nil {
- 		fmt.Println(err, "failed to create chaincode package")
- 	}
- 	fmt.Println("ccPkg created")
+	// Create the chaincode package that will be sent to the peers
+	ccPkg, err := packager.NewCCPackage(chaincodePath, chaincodeGoPath)
+	if err != nil {
+		fmt.Println(err, "failed to create chaincode package")
+	}
+	fmt.Println("ccPkg created")
 
 	chainCodeID := "bilateralchannel"
 	version := "v0"
 
 	req := resmgmt.InstallCCRequest{Name: chainCodeID, Version: version, Path: chaincodePath, Package: ccPkg}
 	// _, err = resMgmtClient.InstallCC(req, resmgmt.WithTargets(peer),  resmgmt.WithRetry(retry.DefaultResMgmtOpts))
-	_, err = resMgmtClient.InstallCC(req,  resmgmt.WithRetry(retry.DefaultResMgmtOpts))
+	_, err = resMgmtClient.InstallCC(req, resmgmt.WithRetry(retry.DefaultResMgmtOpts))
 	if err != nil {
-	    fmt.Printf("failed to install chaincode: %s\n", err)
-			return
+		fmt.Printf("failed to install chaincode: %s\n", err)
+		return
 	}
 	fmt.Println("Chaincode installed")
 }

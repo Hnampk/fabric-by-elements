@@ -8,13 +8,14 @@ import (
 	// "math/rand"
 	// "crypto/x509"
 	// "encoding/pem"
-	"github.com/hyperledger/fabric-sdk-go/pkg/core/config"
 	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/msp"
+	"github.com/hyperledger/fabric-sdk-go/pkg/core/config"
+
 	// "github.com/hyperledger/fabric-sdk-go/pkg/common/providers/context"
 	// "github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
-	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
-	"github.com/hyperledger/fabric-sdk-go/pkg/client/resmgmt"
 	mspclient "github.com/hyperledger/fabric-sdk-go/pkg/client/msp"
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/resmgmt"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
 )
 
 func main() {
@@ -22,10 +23,10 @@ func main() {
 	// Create SDK setup for the integration tests
 	configFile := "network.yaml"
 	configProvider := config.FromFile(configFile)
-  sdk, err1 := fabsdk.New(configProvider)
+	sdk, err1 := fabsdk.New(configProvider)
 	if err1 != nil {
-			fmt.Println("failed to create sdk",err1)
-			return
+		fmt.Println("failed to create sdk", err1)
+		return
 	}
 	defer sdk.Close()
 
@@ -34,31 +35,30 @@ func main() {
 	OrgName := "org1"
 	resourceManagerClientContext := sdk.Context(fabsdk.WithUser(OrgAdmin), fabsdk.WithOrg(OrgName))
 
-
 	fmt.Println("3. Create a resource client instance using its New func, passing the context.")
 	// Create new resource management client
 	resMgmtClient, err := resmgmt.New(resourceManagerClientContext)
 	if err != nil {
-	    fmt.Println("failed to create resource client: ", err)
+		fmt.Println("failed to create resource client: ", err)
 	}
 
 	fmt.Println("3.1 Create a msp client instance using its New func, passing the context.")
 	clientProvider := sdk.Context()
 	mspClient, err := mspclient.New(clientProvider, mspclient.WithOrg(OrgName))
 	if err != nil {
-		 fmt.Println( "failed to create MSP client", err)
-		 return
+		fmt.Println("failed to create MSP client", err)
+		return
 	}
 	fmt.Println("3.2 get admin Identity .")
 	adminIdentity, err := mspClient.GetSigningIdentity(OrgAdmin)
 	if err != nil {
-		 fmt.Println("failed to get admin signing identity: ", err)
+		fmt.Println("failed to get admin signing identity: ", err)
 	}
 	fmt.Println(adminIdentity.Identifier().ID)
 	fmt.Println(adminIdentity.Identifier().MSPID)
 
 	// fmt.Println("3.3 Test get certificate  .")
-  // pubPEMData := adminIdentity.EnrollmentCertificate()
+	// pubPEMData := adminIdentity.EnrollmentCertificate()
 	// s := string(pubPEMData)
 	// fmt.Println(s)
 	// block, rest := pem.Decode(pubPEMData)
@@ -83,7 +83,7 @@ func main() {
 	// defer r.Close()
 	// Read channel configuration tx
 	channelID := "vnpay-channel"
-	channelConfigTxPath := "../../../artifacts/channel/vnpay-channel.tx"
+	channelConfigTxPath := "../fabric/channel-artifacts/vnpay-channel.tx"
 
 	// Create new channel 'mychannel'
 	ordererID := "orderer.example.com"
@@ -92,8 +92,8 @@ func main() {
 	fmt.Println("3.3.1 Call request to create channel   .")
 	_, err = resMgmtClient.SaveChannel(req, resmgmt.WithOrdererEndpoint(ordererID))
 	if err != nil {
-	    fmt.Println("failed to save channel:", err)
-			return
+		fmt.Println("failed to save channel:", err)
+		return
 	}
 
 	fmt.Println("Finish create channel")

@@ -2,13 +2,15 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"math/rand"
+	"strconv"
+
 	"github.com/hyperledger/fabric-sdk-go/pkg/core/config"
-		// fabImpl "github.com/hyperledger/fabric-sdk-go/pkg/fab"
-		// "github.com/hyperledger/fabric-sdk-go/pkg/core/cryptosuite"
+
+	// fabImpl "github.com/hyperledger/fabric-sdk-go/pkg/fab"
+	// "github.com/hyperledger/fabric-sdk-go/pkg/core/cryptosuite"
+	mspclient "github.com/hyperledger/fabric-sdk-go/pkg/client/msp"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
-  mspclient	"github.com/hyperledger/fabric-sdk-go/pkg/client/msp"
 )
 
 func randomUsername() string {
@@ -37,21 +39,19 @@ func main() {
 	// 		fmt.Println(err, "unable create cryptosuit")
 	// }
 	// fmt.Println(defCryptoConfig)
-  sdk, err1 := fabsdk.New(configProvider)
+	sdk, err1 := fabsdk.New(configProvider)
 	if err1 != nil {
-			fmt.Println("failed to create sdk",err1)
-			return
+		fmt.Println("failed to create sdk", err1)
+		return
 	}
 	defer sdk.Close()
 
 	fmt.Println("2. Prepare client context.")
 	fmt.Println("2.1 Create a context based on a user and organization, using your fabsdk instance.")
 
-
 	OrgName := "org2"
 
 	clientContext := sdk.Context()
-
 
 	fmt.Println("3. Create a client instance using its New func, passing the context.")
 	fmt.Println("3.1 Create msp client.")
@@ -59,8 +59,8 @@ func main() {
 	// Create msp client
 	mspClient, err := mspclient.New(clientContext, mspclient.WithOrg(OrgName))
 	if err != nil {
-	    fmt.Println("failed to create msp client: ", err)
-	    return
+		fmt.Println("failed to create msp client: ", err)
+		return
 	}
 	//
 	// fmt.Println("3.2 Enroll admin user.")
@@ -73,20 +73,20 @@ func main() {
 	// }
 
 	fmt.Println("4. Use the funcs provided by each client to create your solution.")
-	username := "abc1"
+	username := "abc2"
 	fmt.Println("4.1 Register user: " + username)
 
-	enrollmentSecret, err := mspClient.Register(&mspclient.RegistrationRequest{Name: username, Affiliation: OrgName })
+	enrollmentSecret, err := mspClient.Register(&mspclient.RegistrationRequest{Name: username, Affiliation: OrgName})
 	if err != nil {
-	    fmt.Printf("Register return error %s\n", err)
-	    return
+		fmt.Printf("Register return error %s\n", err)
+		return
 	}
 
 	fmt.Println("4.2 Enroll user.")
 	err = mspClient.Enroll(username, mspclient.WithSecret(enrollmentSecret))
 	if err != nil {
-	    fmt.Printf("failed to enroll user: %s\n", err)
-	    return
+		fmt.Printf("failed to enroll user: %s\n", err)
+		return
 	}
 	fmt.Println("4.3 Eenroll user is completed")
 

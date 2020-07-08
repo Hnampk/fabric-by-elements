@@ -12,9 +12,9 @@ import (
 	// "github.com/hyperledger/fabric-sdk-go/pkg/common/providers/msp"
 	// "github.com/hyperledger/fabric-sdk-go/pkg/common/providers/context"
 	// "github.com/hyperledger/fabric-sdk-go/pkg/common/providers/fab"
-	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
-	"github.com/hyperledger/fabric-sdk-go/pkg/client/resmgmt"
 	mspclient "github.com/hyperledger/fabric-sdk-go/pkg/client/msp"
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/resmgmt"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
 	//  "github.com/hyperledger/fabric-sdk-go/pkg/fab"
 	// fabpeer "github.com/hyperledger/fabric-sdk-go/pkg/fab/peer"
 )
@@ -24,10 +24,10 @@ func main() {
 	// Create SDK setup for the integration tests
 	configFile := "network.yaml"
 	configProvider := config.FromFile(configFile)
-  sdk, err1 := fabsdk.New(configProvider)
+	sdk, err1 := fabsdk.New(configProvider)
 	if err1 != nil {
-			fmt.Println("failed to create sdk",err1)
-			return
+		fmt.Println("failed to create sdk", err1)
+		return
 	}
 	defer sdk.Close()
 
@@ -36,30 +36,29 @@ func main() {
 	OrgName := "org2"
 	resourceManagerClientContext := sdk.Context(fabsdk.WithUser(OrgAdmin), fabsdk.WithOrg(OrgName))
 
-
 	fmt.Println("3. Create a resource client instance using its New func, passing the context.")
 	// Create new resource management client
 	resMgmtClient, err := resmgmt.New(resourceManagerClientContext)
 	if err != nil {
-	    fmt.Println("failed to create resource client: ", err)
+		fmt.Println("failed to create resource client: ", err)
 	}
 
 	fmt.Println("3.1 Create a msp client instance using its New func, passing the context.")
 	clientProvider := sdk.Context()
 	mspClient, err := mspclient.New(clientProvider, mspclient.WithOrg(OrgName))
 	if err != nil {
-		 fmt.Println( "failed to create MSP client", err)
+		fmt.Println("failed to create MSP client", err)
 	}
 
 	fmt.Println("3.2 get admin Identity .")
 	adminIdentity, err := mspClient.GetSigningIdentity(OrgAdmin)
 	if err != nil {
-		 fmt.Println("failed to get admin signing identity: ", err)
+		fmt.Println("failed to get admin signing identity: ", err)
 	}
 	fmt.Println(adminIdentity.Identifier().ID)
 	fmt.Println(adminIdentity.Identifier().MSPID)
 
-// Try to get genesis
+	// Try to get genesis
 	// cfgBackend, err := sdk.Config()
 	// if err != nil {
 	// 		fmt.Printf("failed to get config backend: %s\n", err)
@@ -95,8 +94,8 @@ func main() {
 	// 		fmt.Printf("Cannot create order : %s\n", err)
 	// 		return
 	// }
-  // fmt.Println(ordrReqCtx)
-  // fmt.Println(orderer)
+	// fmt.Println(ordrReqCtx)
+	// fmt.Println(orderer)
 	// genesisBlock, err := resource.GenesisBlockFromOrderer(ordrReqCtx, channelID, orderer)
 	// if err != nil {
 	// 	fmt.Println("genesis block retrieval failed: ", err)
@@ -107,7 +106,7 @@ func main() {
 	// return
 
 	// serverName := "peer0.org1.example.com"
-  // peerURL := "grpcs://peer0.org1.example.com:7051"
+	// peerURL := "grpcs://peer0.org1.example.com:7051"
 
 	// serverName := "peer1.org1.example.com"
 	// peerURL := "grpcs://peer1.org1.example.com:7056"
@@ -124,8 +123,8 @@ func main() {
 	// err = resMgmtClient.JoinChannel(channelID, resmgmt.WithTargets(peer))
 	err = resMgmtClient.JoinChannel(channelID, resmgmt.WithOrdererEndpoint(ordererID))
 	if err != nil {
-	    fmt.Printf("failed to join channel: %s\n", err)
-			return
+		fmt.Printf("failed to join channel: %s\n", err)
+		return
 	}
 	fmt.Println("Finish join channel")
 }
