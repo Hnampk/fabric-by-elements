@@ -6,7 +6,7 @@ client:
   logging:
     level: info
   cryptoconfig:
-    path: "../../../artifacts/channel/crypto-config"
+    path: "../fabric/crypto-config"
   credentialStore:
     path: "./hfc-store"
     cryptoStore:
@@ -145,24 +145,26 @@ channels:
 organizations:
   Org1:
     mspid: Org1MSP
-    cryptoPath: peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+    cryptoPath: ../fabric/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
     peers:
       - peer0.org1.example.com
       - peer1.org1.example.com
     certificateAuthorities:
       - ca.org1.example.com
+      # - ca-org1
     # adminPrivateKey:
     #   path: ../../../artifacts/channel/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/5890f0061619c06fb29dea8cb304edecc020fe63f41a6db109f1e227cc1cb2a8_sk
     # signedCert:
     #   path: ../../../artifacts/channel/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/admincerts/Admin@org1.example.com-cert.pem
   Org2:
     mspid: Org2MSP
-    cryptoPath:  peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
+    cryptoPath: ../fabric/crypto-config/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
     peers:
       - peer0.org2.example.com
       - peer1.org2.example.com
     certificateAuthorities:
       - ca.org2.example.com
+      # - ca-org2
     # adminPrivateKey:
     #   path: ../../../artifacts/channel/crypto-config/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp/keystore/1995b11d6573ed3be52fcd7a5fa477bc0f183e1f5f398c8281d0ce7c2c75a076_sk
     # signedCert:
@@ -175,7 +177,7 @@ orderers:
       ssl-target-name-override: orderer.example.com
       grpc-max-send-message-length: 4194304
     tlsCACerts:
-      path: ../../../artifacts/channel/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt
+      path: ../fabric/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt
 
 peers:
   peer0.org1.example.com:
@@ -185,21 +187,21 @@ peers:
     grpcOptions:
       ssl-target-name-override: peer0.org1.example.com
     tlsCACerts:
-      path: ../../../artifacts/channel/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+      path: ../fabric/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
 
   peer1.org1.example.com:
     url: grpcs://peer1.org1.example.com:7056
     grpcOptions:
       ssl-target-name-override: peer1.org1.example.com
     tlsCACerts:
-      path: ../../../artifacts/channel/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/ca.crt
+      path: ../fabric/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/ca.crt
 
   peer0.org2.example.com:
     url: grpcs://peer0.org2.example.com:8051
     grpcOptions:
       ssl-target-name-override: peer0.org2.example.com
     tlsCACerts:
-      path: ../../../artifacts/channel/crypto-config/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
+      path: ../fabric/crypto-config/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
 
   peer1.org2.example.com:
     url: grpcs://peer1.org2.example.com:8056
@@ -207,7 +209,7 @@ peers:
     grpcOptions:
       ssl-target-name-override: peer1.org2.example.com
     tlsCACerts:
-      path: ../../../artifacts/channel/crypto-config/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/tls/ca.crt
+      path: ../fabric/crypto-config/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/tls/ca.crt
 
 certificateAuthorities:
   ca.org1.example.com:
@@ -215,19 +217,48 @@ certificateAuthorities:
     httpOptions:
       verify: false
     tlsCACerts:
-      path: ../../../artifacts/channel/crypto-config/peerOrganizations/org1.example.com/ca/ca.org1.example.com-cert.pem
+      path: ../fabric/crypto-config/peerOrganizations/org1.example.com/ca/ca.org1.example.com-cert.pem
     registrar:
         enrollId: admin
         enrollSecret: adminpw
-    caName: ca.org1.example.com
+    caName: ca-org1
 
   ca.org2.example.com:
     url: https://ca.org2.example.com:8054
     httpOptions:
       verify: false
     tlsCACerts:
-      path: ../../../artifacts/channel/crypto-config/peerOrganizations/org2.example.com/ca/ca.org2.example.com-cert.pem
+      path: ../fabric/crypto-config/peerOrganizations/org2.example.com/ca/ca.org2.example.com-cert.pem
     registrar:
         enrollId: admin
         enrollSecret: adminpw
-    caName: ca.org2.example.com
+    caName: ca-org2
+
+    # ca-org1:
+    #   url: https://localhost:7054
+    #   # the properties specified under this object are passed to the 'http' client verbatim when
+    #   # making the request to the Fabric-CA server
+    #   httpOptions:
+    #     verify: false
+    #   tlsCACerts:
+    #     path: ../fabric/crypto-config/peerOrganizations/org1.example.com/ca/ca.org1.example.com-cert.pem
+  
+    #   # Fabric-CA supports dynamic user enrollment via REST APIs. A "root" user, a.k.a registrar, is
+    #   # needed to enroll and invoke new users.
+    #   registrar:
+    #     - enrollId: admin
+    #       enrollSecret: adminpw
+    #   # [Optional] The optional name of the CA.
+    #   caName: ca-org1
+  
+    # ca-org2:
+    #   url: https://localhost:8054
+    #   httpOptions:
+    #     verify: false
+    #   tlsCACerts:
+    #     path: ../fabric/crypto-config/peerOrganizations/org2.example.com/ca/ca.org2.example.com-cert.pem
+    #   registrar:
+    #     - enrollId: admin
+    #       enrollSecret: adminpw
+    #   # [Optional] The optional name of the CA.
+    #   caName: ca-org2
