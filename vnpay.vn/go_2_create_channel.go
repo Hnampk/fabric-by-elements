@@ -34,10 +34,10 @@ func main() {
 	OrgAdmin := "admin"
 	OrgName := "org1"
 	resourceManagerClientContext := sdk.Context(fabsdk.WithUser(OrgAdmin), fabsdk.WithOrg(OrgName))
-
 	fmt.Println("3. Create a resource client instance using its New func, passing the context.")
 	// Create new resource management client
 	resMgmtClient, err := resmgmt.New(resourceManagerClientContext)
+
 	if err != nil {
 		fmt.Println("failed to create resource client: ", err)
 	}
@@ -83,7 +83,7 @@ func main() {
 	// defer r.Close()
 	// Read channel configuration tx
 	channelID := "vnpay-channel"
-	channelConfigTxPath := "../fabric/channel-artifacts/vnpay-channel.tx"
+	channelConfigTxPath := "../fabric/channel-artifacts/channel.tx"
 
 	// Create new channel 'mychannel'
 	ordererID := "orderer.example.com"

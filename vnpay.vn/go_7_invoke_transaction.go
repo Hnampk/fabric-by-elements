@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
-  "github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
-  "github.com/hyperledger/fabric-sdk-go/pkg/client/channel"
-  // "github.com/hyperledger/fabric-sdk-go/pkg/client/channel"
+	"net/http"
+
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/channel"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
+
+	// "github.com/hyperledger/fabric-sdk-go/pkg/client/channel"
 	// mspclient "github.com/hyperledger/fabric-sdk-go/pkg/client/msp"
 	// "github.com/hyperledger/fabric-sdk-go/pkg/client/resmgmt"
 	// "github.com/hyperledger/fabric-sdk-go/pkg/common/errors/retry"
@@ -14,20 +17,24 @@ import (
 	// "github.com/pkg/errors"
 	// "github.com/hyperledger/fabric-sdk-go/pkg/fab"
 	//  fabpeer "github.com/hyperledger/fabric-sdk-go/pkg/fab/peer"
-	 // "github.com/hyperledger/fabric-sdk-go/pkg/client/event"
-
+	// "github.com/hyperledger/fabric-sdk-go/pkg/client/event"
 )
 
-
 func main() {
+	http.HandleFunc("/invoke", invoke)
+
+	http.ListenAndServe(":8090", nil)
+}
+
+func invoke(w http.ResponseWriter, httpreq *http.Request) {
 	fmt.Println("1. Instantiate a fabsdk instance using a configuration.")
 	// Create SDK setup for the integration tests
 	configFile := "network.yaml"
 	configProvider := config.FromFile(configFile)
-  sdk, err1 := fabsdk.New(configProvider)
+	sdk, err1 := fabsdk.New(configProvider)
 	if err1 != nil {
-			fmt.Println("failed to create sdk",err1)
-			return
+		fmt.Println("failed to create sdk", err1)
+		return
 	}
 	defer sdk.Close()
 
@@ -36,18 +43,17 @@ func main() {
 
 	adminUser := "admin"
 	// normalUser := "admin"
-	OrgName := "org1"
+	OrgName := "org2"
 	channelID := "vnpay-channel"
 	clientContext := sdk.ChannelContext(channelID, fabsdk.WithUser(adminUser), fabsdk.WithOrg(OrgName))
 	// clientContext := sdk.ChannelContext(channelID, fabsdk.WithUser(normalUser))
 
-
-	fmt.Println("3. Create a client instance using its New func, passing the context.")
+	fmt.Println("3. Create a client instance using its New func, passing the context.", OrgName)
 	// Create channel client
 	client, err := channel.New(clientContext)
 	if err != nil {
-			fmt.Println("failed to create channel client: ", err)
-			return
+		fmt.Println("failed to create channel client: ", err)
+		return
 	}
 
 	//Try to get genesis
@@ -70,9 +76,9 @@ func main() {
 	// }
 
 	fmt.Println("4. Use the funcs provided by each client to create your solution.")
-	chainCodeID := "test1"
-	fcn := "move"
-	args :=  [][]byte{[]byte("a"),[]byte("b"),[]byte("10")}
+	chainCodeID := "mycc"
+	fcn := "invoke"
+	args := [][]byte{[]byte("a"), []byte("b"), []byte("10")}
 
 	//
 	// eventListener, err := event.New(clientContext)
@@ -92,10 +98,10 @@ func main() {
 
 	req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
 	// response, err := client.Execute(req, channel.WithTargets(peer))
-	 response, err := client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com","peer0.org2.example.com"))
+	response, err := client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com", "peer0.org2.example.com"))
 	if err != nil {
-	    fmt.Println("failed to query chaincode: ", err)
-			return
+		fmt.Println("failed to query chaincode: ", err)
+		return
 	}
 
 	fmt.Println(string(response.TransactionID))

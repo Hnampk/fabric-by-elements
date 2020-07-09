@@ -86,8 +86,8 @@ func main() {
 	}
 	fmt.Println("ccPkg created")
 
-	chainCodeID := "bilateralchannel"
-	version := "v0"
+	chainCodeID := "mycc"
+	version := "1.0"
 
 	req := resmgmt.InstallCCRequest{Name: chainCodeID, Version: version, Path: chaincodePath, Package: ccPkg}
 	// _, err = resMgmtClient.InstallCC(req, resmgmt.WithTargets(peer),  resmgmt.WithRetry(retry.DefaultResMgmtOpts))

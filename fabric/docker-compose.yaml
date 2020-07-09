@@ -13,10 +13,10 @@ services:
       - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
       - FABRIC_CA_SERVER_CA_NAME=ca-org1
       - FABRIC_CA_SERVER_CA_CERTFILE=/etc/hyperledger/fabric-ca-server-config/ca.org1.example.com-cert.pem
-      - FABRIC_CA_SERVER_CA_KEYFILE=/etc/hyperledger/fabric-ca-server-config/ce28dc23858c09ca806d83b6c1da45f202b634d3094d6d045d41cadd63d65566_sk
+      - FABRIC_CA_SERVER_CA_KEYFILE=/etc/hyperledger/fabric-ca-server-config/priv_sk
       - FABRIC_CA_SERVER_TLS_ENABLED=true
       - FABRIC_CA_SERVER_TLS_CERTFILE=/etc/hyperledger/fabric-ca-server-config/ca.org1.example.com-cert.pem
-      - FABRIC_CA_SERVER_TLS_KEYFILE=/etc/hyperledger/fabric-ca-server-config/ce28dc23858c09ca806d83b6c1da45f202b634d3094d6d045d41cadd63d65566_sk
+      - FABRIC_CA_SERVER_TLS_KEYFILE=/etc/hyperledger/fabric-ca-server-config/priv_sk
     ports:
       - "7054:7054"
     command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
@@ -30,10 +30,10 @@ services:
       - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
       - FABRIC_CA_SERVER_CA_NAME=ca-org2
       - FABRIC_CA_SERVER_CA_CERTFILE=/etc/hyperledger/fabric-ca-server-config/ca.org2.example.com-cert.pem
-      - FABRIC_CA_SERVER_CA_KEYFILE=/etc/hyperledger/fabric-ca-server-config/ba1a8ba7dea7bbfc20ac0801217f988653cb32454f5baf0c46aac51805df0c81_sk
+      - FABRIC_CA_SERVER_CA_KEYFILE=/etc/hyperledger/fabric-ca-server-config/priv_sk
       - FABRIC_CA_SERVER_TLS_ENABLED=true
       - FABRIC_CA_SERVER_TLS_CERTFILE=/etc/hyperledger/fabric-ca-server-config/ca.org2.example.com-cert.pem
-      - FABRIC_CA_SERVER_TLS_KEYFILE=/etc/hyperledger/fabric-ca-server-config/ba1a8ba7dea7bbfc20ac0801217f988653cb32454f5baf0c46aac51805df0c81_sk
+      - FABRIC_CA_SERVER_TLS_KEYFILE=/etc/hyperledger/fabric-ca-server-config/priv_sk
     ports:
       - "8054:7054"
     command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
@@ -74,7 +74,7 @@ services:
       - CORE_PEER_ID=peer0.org1.example.com
       - CORE_PEER_LOCALMSPID=Org1MSP
       - CORE_PEER_ADDRESS=peer0.org1.example.com:7051
-      - CORE_PEER_GOSSIP_BOOTSTRAP=peer1.org1.example.com:7051      
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051      
       - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org1.example.com:7051
     ports:
       - 7051:7051
@@ -84,24 +84,24 @@ services:
     depends_on:
       - orderer.example.com
 
-  peer1.org1.example.com:
-    container_name: peer1.org1.example.com
-    extends:
-      file:   base.yaml
-      service: peer-base
-    environment:
-      - CORE_PEER_ID=peer1.org1.example.com
-      - CORE_PEER_LOCALMSPID=Org1MSP
-      - CORE_PEER_ADDRESS=peer1.org1.example.com:7051
-      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051      
-      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer1.org1.example.com:7051
-    ports:
-      - 7056:7051
-      - 7058:7053
-    volumes:
-        - ./crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/:/etc/hyperledger/crypto/peer
-    depends_on:
-      - orderer.example.com
+  # peer1.org1.example.com:
+  #   container_name: peer1.org1.example.com
+  #   extends:
+  #     file:   base.yaml
+  #     service: peer-base
+  #   environment:
+  #     - CORE_PEER_ID=peer1.org1.example.com
+  #     - CORE_PEER_LOCALMSPID=Org1MSP
+  #     - CORE_PEER_ADDRESS=peer1.org1.example.com:7051
+  #     - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051      
+  #     - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer1.org1.example.com:7051
+  #   ports:
+  #     - 7056:7051
+  #     - 7058:7053
+  #   volumes:
+  #       - ./crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/:/etc/hyperledger/crypto/peer
+  #   depends_on:
+  #     - orderer.example.com
 
   peer0.org2.example.com:
     container_name: peer0.org2.example.com
@@ -112,7 +112,7 @@ services:
       - CORE_PEER_ID=peer0.org2.example.com
       - CORE_PEER_LOCALMSPID=Org2MSP
       - CORE_PEER_ADDRESS=peer0.org2.example.com:7051
-      - CORE_PEER_GOSSIP_BOOTSTRAP=peer1.org2.example.com:7051      
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org2.example.com:7051      
       - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org2.example.com:7051
     ports:
       - 8051:7051
@@ -122,24 +122,24 @@ services:
     depends_on:
       - orderer.example.com
 
-  peer1.org2.example.com:
-    container_name: peer1.org2.example.com
-    extends:
-      file:   base.yaml
-      service: peer-base
-    environment:
-      - CORE_PEER_ID=peer1.org2.example.com
-      - CORE_PEER_LOCALMSPID=Org2MSP
-      - CORE_PEER_ADDRESS=peer1.org2.example.com:7051
-      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org2.example.com:7051      
-      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer1.org2.example.com:7051
-    ports:
-      - 8056:7051
-      - 8058:7053
-    volumes:
-        - ./crypto-config/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/:/etc/hyperledger/crypto/peer
-    depends_on:
-      - orderer.example.com
+  # peer1.org2.example.com:
+  #   container_name: peer1.org2.example.com
+  #   extends:
+  #     file:   base.yaml
+  #     service: peer-base
+  #   environment:
+  #     - CORE_PEER_ID=peer1.org2.example.com
+  #     - CORE_PEER_LOCALMSPID=Org2MSP
+  #     - CORE_PEER_ADDRESS=peer1.org2.example.com:7051
+  #     - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org2.example.com:7051      
+  #     - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer1.org2.example.com:7051
+  #   ports:
+  #     - 8056:7051
+  #     - 8058:7053
+  #   volumes:
+  #       - ./crypto-config/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/:/etc/hyperledger/crypto/peer
+  #   depends_on:
+  #     - orderer.example.com
 
   cli:
     container_name: cli
@@ -163,14 +163,15 @@ services:
     command: /bin/bash
     volumes:
         - /var/run/:/host/var/run/
-        - ./src/:/opt/gopath/src
+        # - ./src/:/opt/gopath/src
         - ./crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/
         # - ./scripts:/opt/gopath/src/github.com/hyperledger/fabric/peer/scripts/
         - ./channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
         - ./connection-profiles:/opt/gopath/src/github.com/hyperledger/fabric/peer/connection-profiles
+        - ../chaincode:/opt/gopath/src/github.com/chaincode
     depends_on:
       - orderer.example.com
       - peer0.org1.example.com
-      - peer1.org1.example.com
+      # - peer1.org1.example.com
       - peer0.org2.example.com
-      - peer1.org2.example.com
+      # - peer1.org2.example.com
