@@ -41,6 +41,9 @@ Organizations:
                 Type: Signature
                 Rule: "OR('OrdererMSP.admin')"
 
+        OrdererEndpoints:
+            - orderer.example.com:7050
+
     - &Org1
         # DefaultOrg defines the organization which is used in the sampleconfig
         # of the fabric.git development environment
@@ -57,10 +60,10 @@ Organizations:
         Policies:
             Readers:
                 Type: Signature
-                Rule: "OR('Org1MSP.member')"
+                Rule: "OR('Org1MSP.admin', 'Org1MSP.peer', 'Org1MSP.client')"
             Writers:
                 Type: Signature
-                Rule: "OR('Org1MSP.member')"
+                Rule: "OR('Org1MSP.admin', 'Org1MSP.client')"
             Admins:
                 Type: Signature
                 Rule: "OR('Org1MSP.admin')"
@@ -73,7 +76,7 @@ Organizations:
             # AnchorPeers defines the location of peers which can be used
             # for cross org gossip communication.  Note, this value is only
             # encoded in the genesis block in the Application section context
-            - Host: localhost
+            - Host: peer0.org1.example.com
               Port: 7051
 
     - &Org2
@@ -92,13 +95,16 @@ Organizations:
         Policies:
             Readers:
                 Type: Signature
-                Rule: "OR('Org2MSP.member')"
+                Rule: "OR('Org2MSP.admin', 'Org2MSP.peer', 'Org2MSP.client')"
             Writers:
                 Type: Signature
-                Rule: "OR('Org2MSP.member')"
+                Rule: "OR('Org2MSP.admin', 'Org2MSP.client')"
             Admins:
                 Type: Signature
                 Rule: "OR('Org2MSP.admin')"
+            Endorsement:
+                Type: Signature
+                Rule: "OR('Org2MSP.peer')"
 
         AnchorPeers:
             # AnchorPeers defines the location of peers which can be used
@@ -210,17 +216,14 @@ Application: &ApplicationDefaults
 Orderer: &OrdererDefaults
 
     # Orderer Type: The orderer implementation to start
-    OrdererType: solo
+    OrdererType: etcdraft
 
-    Addresses:
-        - orderer.example.com:7050
-
-    # EtcdRaft:
-    #     Consenters:
-    #     - Host: localhost
-    #       Port: 7050
-    #       ClientTLSCert: ./orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
-    #       ServerTLSCert: ./orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
+    EtcdRaft:
+        Consenters:
+        - Host: orderer.example.com
+          Port: 7050
+          ClientTLSCert: crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
+          ServerTLSCert: crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
 
     # Batch Timeout: The amount of time to wait before creating a batch
     BatchTimeout: 2s
@@ -313,7 +316,6 @@ Profiles:
                 - *OrdererOrg
             Capabilities:
                 <<: *OrdererCapabilities
-                
         Consortiums:
             SampleConsortium:
                 Organizations:

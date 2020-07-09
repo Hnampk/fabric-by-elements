@@ -1,12 +1,12 @@
-name: "Org2 Client"
+name: "Org1 Client"
 version: "1.0"
 
 client:
-  organization: Org2
+  organization: Org1
   credentialStore:
-    path: "./hfc-kvs/org2"
+    path: "./hfc-kvs/org1"
     cryptoStore:
-      path: "./hfc-cvs/org2"
+      path: "./hfc-cvs/org1"
   connection:
     options:
       grpc.keepalive_time_ms: 120000

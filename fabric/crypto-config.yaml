@@ -1,29 +1,59 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# ---------------------------------------------------------------------------
+# "OrdererOrgs" - Definition of organizations managing orderer nodes
+# ---------------------------------------------------------------------------
 OrdererOrgs:
+  # ---------------------------------------------------------------------------
+  # Orderer
+  # ---------------------------------------------------------------------------
   - Name: Orderer
     Domain: example.com
-    Specs: 
+    EnableNodeOUs: true
+    # ---------------------------------------------------------------------------
+    # "Specs" - See PeerOrgs for complete description
+    # ---------------------------------------------------------------------------
+    Specs:
       - Hostname: orderer
+        SANS:
+          - localhost
 
+
+# ---------------------------------------------------------------------------
+# "PeerOrgs" - Definition of organizations managing peer nodes
+# ---------------------------------------------------------------------------
 PeerOrgs:
+  # ---------------------------------------------------------------------------
+  # Org1
+  # ---------------------------------------------------------------------------
   - Name: Org1
     Domain: org1.example.com
-    CA:
-       Hostname: ca
-    
+    EnableNodeOUs: true
     Template:
-      Count: 2
+      Count: 1
       SANS:
-        - "localhost"
+        - localhost
+      # Start: 5
+      # Hostname: {{.Prefix}}{{.Index}} # default
+    # ---------------------------------------------------------------------------
+    # "Users"
+    # ---------------------------------------------------------------------------
+    # Count: The number of user accounts _in addition_ to Admin
+    # ---------------------------------------------------------------------------
     Users:
       Count: 1
+  # ---------------------------------------------------------------------------
+  # Org2
+  # ---------------------------------------------------------------------------
   - Name: Org2
     Domain: org2.example.com
-    CA:
-       Hostname: ca
-    
+    EnableNodeOUs: true
     Template:
-      Count: 3
+      Count: 1
       SANS:
-        - "localhost"
+        - localhost
     Users:
       Count: 1
