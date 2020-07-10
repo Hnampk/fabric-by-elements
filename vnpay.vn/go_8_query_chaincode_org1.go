@@ -64,8 +64,8 @@ func main() {
 
 	fmt.Println("4. Use the funcs provided by each client to create your solution.")
 	chainCodeID := "mycc"
-	fcn := "query"
-	args := [][]byte{[]byte("a")}
+	fcn := "get"
+	args := [][]byte{[]byte("myvar2")}
 	req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
 	response, err := client.Query(req, channel.WithTargets(peer))
 	if err != nil {
