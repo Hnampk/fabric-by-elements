@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"net/http"
+	"time"
 
 	"github.com/hyperledger/fabric-sdk-go/pkg/client/channel"
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/event"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
 
 	// "github.com/hyperledger/fabric-sdk-go/pkg/client/channel"
@@ -21,12 +22,6 @@ import (
 )
 
 func main() {
-	http.HandleFunc("/invoke", invoke)
-
-	http.ListenAndServe(":8090", nil)
-}
-
-func invoke(w http.ResponseWriter, httpreq *http.Request) {
 	fmt.Println("1. Instantiate a fabsdk instance using a configuration.")
 	// Create SDK setup for the integration tests
 	configFile := "network.yaml"
@@ -43,7 +38,7 @@ func invoke(w http.ResponseWriter, httpreq *http.Request) {
 
 	adminUser := "admin"
 	// normalUser := "admin"
-	OrgName := "org2"
+	OrgName := "org1"
 	channelID := "vnpay-channel"
 	clientContext := sdk.ChannelContext(channelID, fabsdk.WithUser(adminUser), fabsdk.WithOrg(OrgName))
 	// clientContext := sdk.ChannelContext(channelID, fabsdk.WithUser(normalUser))
@@ -76,43 +71,67 @@ func invoke(w http.ResponseWriter, httpreq *http.Request) {
 	// }
 
 	fmt.Println("4. Use the funcs provided by each client to create your solution.")
-	chainCodeID := "mycc"
-	fcn := "invoke"
-	args := [][]byte{[]byte("a"), []byte("b"), []byte("10")}
+	chainCodeID := "mycc3"
+	fcn := "update"
+	args := [][]byte{[]byte("myvar"), []byte("100"), []byte("+")}
 
 	//
-	// eventListener, err := event.New(clientContext)
-	// if err != nil {
-	// 	fmt.Println(err, "failed to create new event client")
-	// 	return
-	// }
+	eventListener, err := event.New(clientContext, event.WithBlockEvents())
+	if err != nil {
+		fmt.Println(err, "failed to create new event client")
+		return
+	}
 
-	// transientDataMap := make(map[string][]byte)
-	// transientDataMap["result"] = []byte("Transient data in hello invoke")
-	//
-	// reg, notifier, err := eventListener.RegisterChaincodeEvent(chainCodeID, eventID)
-	// if err != nil {
-	// 	return "", err
-	// }
-	// defer eventListener.Unregister(reg)
+	transientDataMap := make(map[string][]byte)
+	transientDataMap["result"] = []byte("Transient data in hello invoke")
+
+	reg, notifier, err := eventListener.RegisterBlockEvent()
+	if err != nil {
+		fmt.Println("failed to register block event", err)
+		return
+	}
+	defer eventListener.Unregister(reg)
+
+	fmt.Println("block event registered successfully")
+
+	reg2, notifier2, err2 := eventListener.RegisterChaincodeEvent(chainCodeID, "updateEvent")
+	if err2 != nil {
+		return
+	}
+	defer eventListener.Unregister(reg2)
+	fmt.Println("RegisterChaincodeEvent event registered successfully")
 
 	req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
 	// response, err := client.Execute(req, channel.WithTargets(peer))
-	response, err := client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com", "peer0.org2.example.com"))
+	response, err := client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com"))
 	if err != nil {
 		fmt.Println("failed to query chaincode: ", err)
 		return
 	}
-
+	response.
 	fmt.Println(string(response.TransactionID))
+
+	go func() {
+		select {
+		case ccEvent := <-notifier2:
+			fmt.Println("notifier2: ", ccEvent)
+			// fmt.Println("Descriptor: ", ccEvent.Block.Descriptor)
+		case <-time.After(time.Second * 20):
+			fmt.Println("did NOT receive CC event for eventId: ")
+			return
+		}
+	}()
 
 	fmt.Println("5. Finish execute")
 	// Wait for the result of the submission
-	// select {
-	// 	case ccEvent := <-notifier:
-	// 		fmt.Println("Received CC event: ", ccEvent)
-	// 	case <-time.After(time.Second * 20):
-	// 		return "", Println("did NOT receive CC event for eventId: ", eventID)
-	// }
-
+	select {
+	case ccEvent := <-notifier:
+		fmt.Println("notifier: ", ccEvent.Block.GetMetadata())
+		// .GetHeader().String())
+		// fmt.Println("Descriptor: ", ccEvent.Block.Descriptor)
+	case <-time.After(time.Second * 20):
+		fmt.Println("did NOT receive CC event for eventId: ")
+		return
+	}
+	
 }

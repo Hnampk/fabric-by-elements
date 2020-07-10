@@ -24,6 +24,13 @@ network/
 
 test fabric-go-sdk
 
+0. Generate artifacts
+    - channel genesis.block:
+		../bin/configtxgen -profile TwoOrgsOrdererGenesis -channelID byfn-sys-channel -outputBlock ./channel-artifacts/genesis.block
+    
+    - channel.tx
+        ../bin/configtxgen -profile TwoOrgsChannel -channelID vnpay-channel -outputCreateChannelTx ./channel-artifacts/channel.tx
+
 1. start.sh => các container trong fabric/
 
 2. cd vnpay.vn/
@@ -56,6 +63,10 @@ test fabric-go-sdk
 
     - Packaging chaincode
         peer lifecycle chaincode package mycc.tar.gz --path github.com/chaincode/abstore/go/ --lang golang --label mycc_1
+        
+        # HIGH THOUGHPUT CC: 
+        peer lifecycle chaincode package mycc.tar.gz --path /opt/gopath/src/github.com/chaincode/high-throughput --lang golang --label mycc_1
+
 
     - Install chaincode
         peer lifecycle chaincode install mycc.tar.gz
@@ -86,3 +97,5 @@ test fabric-go-sdk
 5. Query chaincode (go_8)
 
 6. Invoke chaincode (go_7)
+
+# API server: go run go ht_invoke.go
