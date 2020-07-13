@@ -71,7 +71,7 @@ func main() {
 	// }
 
 	fmt.Println("4. Use the funcs provided by each client to create your solution.")
-	chainCodeID := "mycc3"
+	chainCodeID := "mycc"
 	fcn := "update"
 	args := [][]byte{[]byte("myvar"), []byte("100"), []byte("+")}
 
@@ -108,7 +108,7 @@ func main() {
 		fmt.Println("failed to query chaincode: ", err)
 		return
 	}
-	response.
+
 	fmt.Println(string(response.TransactionID))
 
 	go func() {
@@ -133,5 +133,5 @@ func main() {
 		fmt.Println("did NOT receive CC event for eventId: ")
 		return
 	}
-	
+
 }
