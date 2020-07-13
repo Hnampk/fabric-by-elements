@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/hyperledger/fabric-sdk-go/pkg/client/channel"
@@ -40,37 +41,137 @@ var adminUser string = "admin"
 var OrgName string = "org1"
 var org1User string = "admin"
 var channelID string = "vnpay-channel"
-var chainCodeID string = "mycc3"
+var chainCodeID string = "mycc"
+
+const workerNum = 20 // number of Client
+
+type ClientWorker struct {
+	id              int
+	client          *channel.Client
+	invokeChannel   chan InvokeRequest
+	responseChannel chan string
+	eventListener   *event.Client
+}
+
+var invokeChannel chan InvokeRequest
+var responseChannel chan string
 
 func main() {
+
+	invokeChannel = make(chan InvokeRequest)
+	responseChannel = make(chan string)
+
 	// create a new handler
+
+	configProvider := config.FromFile(configFile)
+
+	for i := 0; i < workerNum; i++ {
+
+		sdk, err := fabsdk.New(configProvider)
+		if err != nil {
+			fmt.Println("failed to create sdk", err)
+			return
+		}
+
+		defer sdk.Close()
+
+		clientContext := sdk.ChannelContext(channelID, fabsdk.WithUser(adminUser), fabsdk.WithOrg(OrgName))
+		client, err := channel.New(clientContext)
+
+		if err != nil {
+			fmt.Println(err, "failed to create new client")
+		}
+
+		eventListener, err := event.New(clientContext, event.WithBlockEvents())
+		if err != nil {
+			fmt.Println(err, "failed to create new event client")
+			// return
+		}
+
+		worker := ClientWorker{
+			id:              i,
+			client:          client,
+			invokeChannel:   invokeChannel,
+			responseChannel: responseChannel,
+			eventListener:   eventListener,
+		}
+
+		if err != nil {
+			fmt.Println("failed to create channel client: ", err)
+			return
+		}
+
+		go worker.start()
+
+		fmt.Println(">>>>>>>>>>>>>>[CUSTOM]Started Client ", worker)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/invoke", invoke)
 	mux.HandleFunc("/query", query)
+	// mux.HandleFunc("/oldInvoke", oldInvoke)
 	// listen and serve
 	http.ListenAndServe(":8090", mux)
 }
 
+func (c *ClientWorker) start() {
+	for req := range c.invokeChannel {
+		fcn := req.FuncName
+		args := [][]byte{}
+
+		for _, element := range req.Args {
+			args = append(args, []byte(element))
+		}
+
+		registration, notifier, err := c.eventListener.RegisterChaincodeEvent(chainCodeID, "updateEvent")
+
+		if err != nil {
+			fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
+			c.responseChannel <- err.Error()
+			c.eventListener.Unregister(registration)
+			continue
+		}
+		// defer c.eventListener.Unregister(registration)
+
+		req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
+
+		response, err := c.client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com"))
+		if err != nil {
+			fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
+			c.responseChannel <- err.Error()
+			c.eventListener.Unregister(registration)
+			continue
+		}
+
+		fmt.Println(string("txid: " + response.TransactionID))
+		// iterate until
+		var count int
+		func() {
+			for {
+				select {
+				case ccEvent := <-notifier:
+
+					if ccEvent.TxID != string(response.TransactionID) {
+						count++
+						continue
+					}
+
+					c.responseChannel <- "OK " + strconv.Itoa(count)
+					c.eventListener.Unregister(registration)
+
+					return
+				case <-time.After(time.Second * 1):
+					c.responseChannel <- "Timeout"
+					c.eventListener.Unregister(registration)
+
+					return
+				}
+			}
+		}()
+	}
+}
+
 func invoke(w http.ResponseWriter, r *http.Request) {
-	configProvider := config.FromFile(configFile)
-
-	var err error
-
-	sdk, err := fabsdk.New(configProvider)
-	if err != nil {
-		fmt.Println("failed to create sdk", err)
-		return
-	}
-	defer sdk.Close()
-
-	clientContext := sdk.ChannelContext(channelID, fabsdk.WithUser(adminUser), fabsdk.WithOrg(OrgName))
-
-	client, err := channel.New(clientContext)
-	if err != nil {
-		fmt.Println("failed to create channel client: ", err)
-		return
-	}
-
 	body, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
@@ -82,49 +183,9 @@ func invoke(w http.ResponseWriter, r *http.Request) {
 	var invokeRequest InvokeRequest
 	json.Unmarshal(body, &invokeRequest)
 
-	fcn := invokeRequest.FuncName
+	invokeChannel <- invokeRequest
 
-	args := [][]byte{}
-	for _, element := range invokeRequest.Args {
-		args = append(args, []byte(element))
-	}
-
-	eventListener, err := event.New(clientContext, event.WithBlockEvents())
-	if err != nil {
-		fmt.Println(err, "failed to create new event client")
-		return
-	}
-
-	reg2, notifier2, err2 := eventListener.RegisterChaincodeEvent(chainCodeID, "updateEvent")
-	if err2 != nil {
-		return
-	}
-	defer eventListener.Unregister(reg2)
-
-	fmt.Println("RegisterChaincodeEvent event registered successfully")
-
-	req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
-
-	response, err := client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com"))
-	if err != nil {
-		fmt.Println("failed to query chaincode: ", err)
-		return
-	}
-
-	fmt.Println(string("txid: " + response.TransactionID))
-
-	select {
-	case ccEvent := <-notifier2:
-		fmt.Println("notifier2: ", ccEvent.TxID)
-		if ccEvent.TxID == string(response.TransactionID) {
-			fmt.Fprint(w, "OK")
-		}
-		// fmt.Println("Descriptor: ", ccEvent.Block.Descriptor)
-	case <-time.After(time.Second * 20):
-		fmt.Println("did NOT receive CC event for eventId: ")
-		fmt.Fprint(w, "Timeout")
-		return
-	}
+	fmt.Fprint(w, <-responseChannel)
 }
 
 func query(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +233,7 @@ func query(w http.ResponseWriter, r *http.Request) {
 	var queryRequest QueryRequest
 	json.Unmarshal(body, &queryRequest)
 
-	fcn := "get"
+	fcn := "getstandard"
 	args := [][]byte{[]byte(queryRequest.Name)}
 
 	req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
@@ -189,3 +250,91 @@ func query(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("5. Finish query")
 
 }
+
+/*
+	invoke Chaincode without using client pool
+*/
+// func oldInvoke(w http.ResponseWriter, r *http.Request) {
+// 	configProvider := config.FromFile(configFile)
+
+// 	var err error
+
+// 	sdk, err := fabsdk.New(configProvider)
+// 	if err != nil {
+// 		fmt.Println("failed to create sdk", err)
+// 		return
+// 	}
+// 	defer sdk.Close()
+
+// 	clientContext := sdk.ChannelContext(channelID, fabsdk.WithUser(adminUser), fabsdk.WithOrg(OrgName))
+
+// 	client, err := channel.New(clientContext)
+// 	if err != nil {
+// 		fmt.Println("failed to create channel client: ", err)
+// 		return
+// 	}
+
+// 	body, err := ioutil.ReadAll(r.Body)
+
+// 	if err != nil {
+// 		fmt.Printf("Error reading body: %v", err)
+// 		http.Error(w, "can't read body", http.StatusBadRequest)
+// 		return
+// 	}
+
+// 	var invokeRequest InvokeRequest
+// 	json.Unmarshal(body, &invokeRequest)
+
+// 	fcn := invokeRequest.FuncName
+
+// 	args := [][]byte{}
+// 	for _, element := range invokeRequest.Args {
+// 		args = append(args, []byte(element))
+// 	}
+
+// 	eventListener, err := event.New(clientContext, event.WithBlockEvents())
+// 	if err != nil {
+// 		fmt.Println(err, "failed to create new event client")
+// 		return
+// 	}
+
+// 	reg2, notifier2, err2 := eventListener.RegisterChaincodeEvent(chainCodeID, "updateEvent")
+// 	if err2 != nil {
+// 		return
+// 	}
+// 	defer eventListener.Unregister(reg2)
+
+// 	fmt.Println("RegisterChaincodeEvent event registered successfully")
+
+// 	req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
+
+// 	response, err := client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com"))
+// 	if err != nil {
+// 		fmt.Println("failed to query chaincode: ", err)
+// 		return
+// 	}
+
+// 	fmt.Println(string("txid: " + response.TransactionID))
+
+// 	for {
+// 		select {
+// 		case ccEvent := <-notifier2:
+
+// 			if ccEvent.TxID != string(response.TransactionID) {
+// 				fmt.Println("notifier2: ", response.TransactionID, "\t", ccEvent.TxID)
+// 				continue
+// 			}
+
+// 			fmt.Fprint(w, "OK")
+// 			return
+
+// 			// fmt.Println("Descriptor: ", ccEvent.Block.Descriptor)
+// 		case <-time.After(time.Millisecond * 50):
+// 			fmt.Println("did NOT receive CC event for eventId: ")
+// 			fmt.Fprint(w, "Timeout")
+// 			return
+// 		}
+// 	}
+
+// 	fmt.Println("DONEE", response.TransactionID)
+// }
