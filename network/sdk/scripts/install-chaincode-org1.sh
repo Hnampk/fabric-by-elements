@@ -10,7 +10,7 @@ export FABRIC_CFG_PATH=/home/nampkh/nampkh/my-fabric/network
 
 export CORE_PEER_TLS_CERT_FILE=/home/nampkh/nampkh/my-fabric/network/peer/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.crt
 export CORE_PEER_TLS_KEY_FILE=/home/nampkh/nampkh/my-fabric/network/peer/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.key
-export CORE_PEER_TLS_ENABLED=true
+export CORE_PEER_TLS_ENABLED=false
 
 
 CHANNEL_NAME=vnpay-channel
@@ -39,7 +39,7 @@ PACKAGE_ID=`sed -n '/Package/{s/^Package ID: //; s/, Label:.*$//; p;}' $PKG_DIR/
 rm $PKG_DIR/log.txt
 
 
-SEQUENCE=8
+SEQUENCE=1
 
 echo "================ APPROVE CHAINCODE ================"
 ../../../new-bin/peer lifecycle chaincode approveformyorg \
@@ -115,8 +115,7 @@ echo "================ TEST INVOKE CHAINCODE ================"
 --waitForEvent
 
 echo "================ TEST QUERY CHAINCODE ================"
-docker exec cli \
-peer chaincode query \
+../../../new-bin/peer chaincode query \
 -C $CHANNEL_NAME \
 -n $CC_NAME \
 -c '{"Args":["get","myvar"]}'

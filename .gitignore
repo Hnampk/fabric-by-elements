@@ -1,4 +1,8 @@
 # Specifies intentionally untracked files to ignore when using Git
 # http://git-scm.com/docs/gitignore
-network/orderer/crypto-config/
-network/peer/crypto-config/
+# network/orderer/crypto-config/
+# network/peer/crypto-config/
+
+network/peer/data/
+network/orderer/data/
+network/sdk/data/
