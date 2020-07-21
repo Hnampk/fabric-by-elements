@@ -43,11 +43,11 @@ channels:
         ledgerQuery: true
         eventSource: true
 
-      peer1.org1.example.com:
-        endorsingPeer: false
-        chaincodeQuery: true
-        ledgerQuery: true
-        eventSource: false
+#      peer1.org1.example.com:
+#        endorsingPeer: false
+#        chaincodeQuery: true
+#        ledgerQuery: true
+#        eventSource: false
 
       # peer0.org2.example.com:
       #   endorsingPeer: true
@@ -193,18 +193,17 @@ peers:
   peer0.org1.example.com:
     # this URL is used to send endorsement and query requests
     url: grpcs://peer0.org1.example.com:7051
-
     grpcOptions:
       ssl-target-name-override: peer0.org1.example.com
     tlsCACerts:
       path: ../fabric/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
 
-  # peer1.org1.example.com:
-  #   url: grpcs://peer1.org1.example.com:7056
-  #   grpcOptions:
-  #     ssl-target-name-override: peer1.org1.example.com
-  #   tlsCACerts:
-  #     path: ../fabric/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/ca.crt
+#  peer1.org1.example.com:
+#    url: grpcs://peer1.org1.example.com:7051
+#    grpcOptions:
+#      ssl-target-name-override: peer1.org1.example.com
+#    tlsCACerts:
+#      path: ../fabric/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/ca.crt
 
   # peer0.org2.example.com:
   #   url: grpcs://peer0.org2.example.com:8051

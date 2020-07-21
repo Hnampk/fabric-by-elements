@@ -22,7 +22,7 @@ import (
 func main() {
 	fmt.Println("1. Instantiate a fabsdk instance using a configuration.")
 	// Create SDK setup for the integration tests
-	configFile := "network.yaml"
+	configFile := "spitted-network.yaml"
 	configProvider := config.FromFile(configFile)
 	sdk, err1 := fabsdk.New(configProvider)
 	if err1 != nil {
