@@ -33,7 +33,7 @@ PeerOrgs:
     Domain: org1.example.com
     EnableNodeOUs: true
     Template:
-      Count: 1
+      Count: 2
       SANS:
         - localhost
       # Start: 5
@@ -45,15 +45,3 @@ PeerOrgs:
     # ---------------------------------------------------------------------------
     Users:
       Count: 1
-  # ---------------------------------------------------------------------------
-  # Org2
-  # ---------------------------------------------------------------------------
-  # - Name: Org2
-  #   Domain: org2.example.com
-  #   EnableNodeOUs: true
-  #   Template:
-  #     Count: 1
-  #     SANS:
-  #       - localhost
-  #   Users:
-  #     Count: 1

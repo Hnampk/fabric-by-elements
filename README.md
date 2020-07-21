@@ -61,7 +61,7 @@ test fabric-go-sdk
 
     - Join channel
     
-        peer channel join -b mychannel.block
+        peer channel join -b vnpay-channel.block
 
     - Packaging chaincode
     

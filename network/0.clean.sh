@@ -15,13 +15,21 @@ sleep 2
 echo "============CLEAN PEER DATA============"
 cd ../peer
 if [ -d "data" ]; then
-rm -Rf data
+rm -rf data/*
 fi
 
 sleep 2
 
-echo "============CLEAN CHANNEL DATA============"
-cd ../
-if [ -d "channel-artifacts" ]; then
-rm -Rf channel-artifacts
+echo "============CLEAN CHAINCODE DATA============"
+cd ../sdk
+if [ -d "data" ]; then
+rm -R data/*
 fi
+
+sleep 2
+
+# echo "============CLEAN CHANNEL DATA============"
+# cd ../
+# if [ -d "channel-artifacts" ]; then
+# rm -Rf channel-artifacts
+# fi

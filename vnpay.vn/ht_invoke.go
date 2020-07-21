@@ -33,7 +33,8 @@ type InvokeRequest struct {
 }
 
 type QueryRequest struct {
-	Name string
+	FuncName string
+	Name     string
 }
 
 var configFile string = "network.yaml"
@@ -123,52 +124,141 @@ func (c *ClientWorker) start() {
 			args = append(args, []byte(element))
 		}
 
-		registration, notifier, err := c.eventListener.RegisterChaincodeEvent(chainCodeID, "updateEvent")
+		responseChannel := make(chan string)
+		triggerStop := make(chan string)
 
-		if err != nil {
-			fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
-			c.responseChannel <- err.Error()
-			c.eventListener.Unregister(registration)
-			continue
-		}
-		// defer c.eventListener.Unregister(registration)
+		go c.exec(fcn, args, responseChannel, triggerStop)
+		go timeOutChecker(responseChannel)
 
-		req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
+		result := <-responseChannel
+		fmt.Println("GOT SOMETHING", result)
 
-		response, err := c.client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com"))
-		if err != nil {
-			fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
-			c.responseChannel <- err.Error()
-			c.eventListener.Unregister(registration)
-			continue
+		if result == "Timeout" {
+			triggerStop <- "done job"
+			c.responseChannel <- "Timeout"
+		} else {
+			c.responseChannel <- result
 		}
 
-		fmt.Println(string("txid: " + response.TransactionID))
-		// iterate until
-		var count int
-		func() {
-			for {
-				select {
-				case ccEvent := <-notifier:
+		continue
 
-					if ccEvent.TxID != string(response.TransactionID) {
-						count++
-						continue
-					}
+		// registration, notifier, err := c.eventListener.RegisterChaincodeEvent(chainCodeID, "updateEvent")
 
-					c.responseChannel <- "OK " + strconv.Itoa(count)
-					c.eventListener.Unregister(registration)
+		// if err != nil {
+		// 	fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
+		// 	c.responseChannel <- err.Error()
+		// 	c.eventListener.Unregister(registration)
+		// 	continue
+		// }
+		// // defer c.eventListener.Unregister(registration)
 
-					return
-				case <-time.After(time.Second * 1):
-					c.responseChannel <- "Timeout"
-					c.eventListener.Unregister(registration)
+		// req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
 
-					return
-				}
-			}
-		}()
+		// response, err := c.client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com"))
+		// if err != nil {
+		// 	fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
+		// 	c.responseChannel <- err.Error()
+		// 	c.eventListener.Unregister(registration)
+		// 	continue
+		// }
+
+		// fmt.Println(string("txid: " + response.TransactionID))
+		// // iterate until receive the exact transactionID event
+
+		// var count int
+		// func() {
+		// 	timeOutChannel := make(chan string)
+
+		// 	go timeOutChecker(timeOutChannel)
+		// 	// select {
+		// 	// case <-timeOutChannel:
+		// 	// 	c.responseChannel <- "Timeout"
+		// 	// 	c.eventListener.Unregister(registration)
+		// 	// 	return
+
+		// 	// }
+
+		// 	for {
+		// 		select {
+		// 		case ccEvent := <-notifier:
+
+		// 			if ccEvent.TxID != string(response.TransactionID) {
+		// 				count++
+		// 				continue
+		// 			}
+
+		// 			c.responseChannel <- "OK after receive " + strconv.Itoa(count) + " events, served by clientId: " + strconv.Itoa(c.id)
+		// 			c.eventListener.Unregister(registration)
+
+		// 			return
+		// 			// case <-time.After(time.Millisecond * 5):
+		// 			// 	c.responseChannel <- "Timeout"
+		// 			// 	c.eventListener.Unregister(registration)
+
+		// 			// 	return
+		// 		}
+		// 	}
+		// }()
+
 	}
+}
+
+func timeOutChecker(c chan string) {
+	select {
+	case <-time.After(time.Second * 5):
+		c <- "Timeout"
+	}
+}
+
+func (c *ClientWorker) exec(fcn string, args [][]byte, responseChannel chan string, timeout chan string) {
+
+	registration, notifier, err := c.eventListener.RegisterChaincodeEvent(chainCodeID, "updateEvent")
+
+	if err != nil {
+		fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
+		responseChannel <- err.Error()
+		c.eventListener.Unregister(registration)
+		return
+	}
+	// defer c.eventListener.Unregister(registration)
+
+	req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
+
+	response, err := c.client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com"))
+	if err != nil {
+		fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
+		responseChannel <- err.Error()
+		c.eventListener.Unregister(registration)
+		return
+	}
+
+	fmt.Println(string("txid: " + response.TransactionID))
+	// iterate until receive the exact transactionID event
+
+	var count int
+	func() {
+
+		for {
+			select {
+			case ccEvent := <-notifier:
+
+				if ccEvent.TxID != string(response.TransactionID) {
+					count++
+					continue
+				}
+
+				fmt.Println("HEREEE")
+				responseChannel <- "OK after receive " + strconv.Itoa(count) + " events, served by clientId: " + strconv.Itoa(c.id)
+				c.eventListener.Unregister(registration)
+				return
+			case <-timeout:
+				fmt.Println("timeout triggered")
+				c.eventListener.Unregister(registration)
+				return
+			}
+		}
+	}()
+
 }
 
 func invoke(w http.ResponseWriter, r *http.Request) {
@@ -184,8 +274,14 @@ func invoke(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(body, &invokeRequest)
 
 	invokeChannel <- invokeRequest
+	response := <-responseChannel
 
-	fmt.Fprint(w, <-responseChannel)
+	if response == "Timeout" {
+		http.Error(w, "tineout", 500)
+	} else {
+		fmt.Fprint(w, response)
+
+	}
 }
 
 func query(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +311,7 @@ func query(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("failed to get endpointConfig: %s\n", err)
 	}
 	serverName := "peer0.org1.example.com"
-	peerURL := "grpcs://peer0.org1.example.com:7051"
+	peerURL := "grpcs://peer0.org1.example.com:7056"
 	peer, err := fabpeer.New(endpointConfig, fabpeer.WithURL(peerURL), fabpeer.WithMSPID(OrgName), fabpeer.WithServerName(serverName))
 	if err != nil {
 		fmt.Printf("failed to create peer: %s\n", err)
@@ -233,7 +329,7 @@ func query(w http.ResponseWriter, r *http.Request) {
 	var queryRequest QueryRequest
 	json.Unmarshal(body, &queryRequest)
 
-	fcn := "getstandard"
+	fcn := queryRequest.FuncName
 	args := [][]byte{[]byte(queryRequest.Name)}
 
 	req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}

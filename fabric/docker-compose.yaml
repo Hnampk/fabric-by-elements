@@ -84,24 +84,25 @@ services:
     depends_on:
       - orderer.example.com
 
-  # peer1.org1.example.com:
-  #   container_name: peer1.org1.example.com
-  #   extends:
-  #     file:   base.yaml
-  #     service: peer-base
-  #   environment:
-  #     - CORE_PEER_ID=peer1.org1.example.com
-  #     - CORE_PEER_LOCALMSPID=Org1MSP
-  #     - CORE_PEER_ADDRESS=peer1.org1.example.com:7051
-  #     - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051      
-  #     - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer1.org1.example.com:7051
-  #   ports:
-  #     - 7056:7051
-  #     - 7058:7053
-  #   volumes:
-  #       - ./crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/:/etc/hyperledger/crypto/peer
-  #   depends_on:
-  #     - orderer.example.com
+  peer1.org1.example.com:
+    container_name: peer1.org1.example.com
+    extends:
+      file:   base.yaml
+      service: peer-base
+    environment:
+      - CORE_PEER_ID=peer1.org1.example.com
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_ADDRESS=peer1.org1.example.com:7051
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051      
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer1.org1.example.com:7051
+    ports:
+      - 7056:7051
+      - 7058:7053
+    volumes:
+        - ./crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/:/etc/hyperledger/crypto/peer
+    depends_on:
+      - orderer.example.com
+      - peer0.org1.example.com
 
   # peer0.org2.example.com:
   #   container_name: peer0.org2.example.com
@@ -172,6 +173,6 @@ services:
     depends_on:
       - orderer.example.com
       - peer0.org1.example.com
-      # - peer1.org1.example.com
+      - peer1.org1.example.com
       # - peer0.org2.example.com
       # - peer1.org2.example.com

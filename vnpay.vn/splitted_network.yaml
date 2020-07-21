@@ -1,0 +1,83 @@
+name: "Network"
+version: "1.0"
+
+client:
+  organization: Org1
+  logging:
+    level: info
+  # cryptoconfig:
+  #   path: "../fabric/crypto-config"
+  credentialStore:
+    path: "./hfc-msp/signcerts"
+    cryptoStore:
+      path: "./hfc-msp"
+  connection:
+    options:
+      grpc.keepalive_time_ms: 120000
+  # BCCSP:
+  #     security:
+  #      enabled: true
+  #      default:
+  #       provider: "SW"
+  #      hashAlgorithm: "SHA2"
+  #      softVerify: true
+  #      level: 256
+
+  # tlsCerts:
+    #[Optional]. Use system certificate pool when connecting to peers, orderers (for negotiating TLS) Default: false
+    # systemCertPool: true
+    #[Optional]. Client key and cert for TLS handshake with peers and orderers
+    # client:
+      # key:
+      #   path: /home/nampkh/nampkh/my-fabric/network/peer/crypto-config/peerOrganizations/org1.example.com/users/User1@org1.example.com/tls/client.key
+      # cert:
+      #   path: /home/nampkh/nampkh/my-fabric/network/peer/crypto-config/peerOrganizations/org1.example.com/users/User1@org1.example.com/tls/client.crt
+channels:
+  vnpay-channel:
+    orderers:
+      - orderer.example.com
+    peers:
+      peer0.org1.example.com:
+        endorsingPeer: true
+        chaincodeQuery: true
+        ledgerQuery: true
+        eventSource: true
+
+organizations:
+  Org1:
+    mspid: Org1MSP
+    cryptoPath: ../peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+    peers:
+      - peer0.org1.example.com
+    certificateAuthorities:
+      - ca.org1.example.com
+
+orderers:
+  orderer.example.com:
+    url: grpcs://orderer.example.com:7050
+    grpcOptions:
+      ssl-target-name-override: orderer.example.com
+      grpc-max-send-message-length: 4194304
+    tlsCACerts:
+      path: ../orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt
+
+peers:
+  peer0.org1.example.com:
+    # this URL is used to send endorsement and query requests
+    url: grpcs://peer0.org1.example.com:7051
+    grpcOptions:
+      ssl-target-name-override: peer0.org1.example.com
+    tlsCACerts:
+      path: ../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+
+certificateAuthorities:
+  ca.org1.example.com:
+    url: https://ca.org1.example.com:7054
+    httpOptions:
+      verify: false
+    tlsCACerts:
+      path: ../peer/crypto-config/peerOrganizations/org1.example.com/ca/ca.org1.example.com-cert.pem
+    registrar:
+        enrollId: admin
+        enrollSecret: adminpw
+    caName: ca.org1.example.com

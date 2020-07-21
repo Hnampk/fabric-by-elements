@@ -1,4 +1,4 @@
-[34m2020-07-07 18:01:38.421 +07 [cli.lifecycle.chaincode] setOrdererClient -> INFO 001[0m Retrieved channel (mychannel) orderer endpoint: 127.0.0.1:7050
+[34m2020-07-20 14:33:19.603 +07 [cli.lifecycle.chaincode] setOrdererClient -> INFO 001[0m Retrieved channel (vnpay-channel) orderer endpoint: 127.0.0.1:7050
 Error: failed to retrieve broadcast client: orderer client failed to connect to 127.0.0.1:7050: failed to create new connection: context deadline exceeded
 Usage:
   peer lifecycle chaincode approveformyorg [flags]

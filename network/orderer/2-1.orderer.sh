@@ -14,10 +14,10 @@ export ORDERER_GENERAL_TLS_PRIVATEKEY=/home/nampkh/nampkh/my-fabric/network/orde
 export ORDERER_GENERAL_TLS_CERTIFICATE=/home/nampkh/nampkh/my-fabric/network/orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
 export ORDERER_GENERAL_TLS_ROOTCAS=[/home/nampkh/nampkh/my-fabric/network/orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt]
 export ORDERER_KAFKA_TOPIC_REPLICATIONFACTOR=1
-export ORDERER_KAFKA_VERBOSE=true
-export ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE=/home/nampkh/nampkh/my-fabric/network/orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
-export ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY=/home/nampkh/nampkh/my-fabric/network/orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.key
-export ORDERER_GENERAL_CLUSTER_ROOTCAS=[/home/nampkh/nampkh/my-fabric/network/orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt]
+# export ORDERER_KAFKA_VERBOSE=true
+# export ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE=/home/nampkh/nampkh/my-fabric/network/orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
+# export ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY=/home/nampkh/nampkh/my-fabric/network/orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.key
+# export ORDERER_GENERAL_CLUSTER_ROOTCAS=[/home/nampkh/nampkh/my-fabric/network/orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt]
 
 
-../../bin/orderer
+../../new-bin/orderer
