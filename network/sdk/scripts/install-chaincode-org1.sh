@@ -39,19 +39,20 @@ PACKAGE_ID=`sed -n '/Package/{s/^Package ID: //; s/, Label:.*$//; p;}' $PKG_DIR/
 rm $PKG_DIR/log.txt
 
 
-SEQUENCE=1
+SEQUENCE=2
 
 echo "================ APPROVE CHAINCODE ================"
 ../../../new-bin/peer lifecycle chaincode approveformyorg \
--o $ORDERER_HOST:7050 --tls $CORE_PEER_TLS_ENABLED \
---cafile $ORDERER_CA \
+-o $ORDERER_HOST:7050 \
 --channelID $CHANNEL_NAME \
 --name $CC_NAME \
 --version $CC_VERSION \
 --init-required \
 --package-id $PACKAGE_ID \
 --sequence $SEQUENCE \
---waitForEvent
+--waitForEvent \
+# --tls $CORE_PEER_TLS_ENABLED \
+# --cafile $ORDERER_CA \
 
 
 echo "================ CHECK COMMIT READINESS ================"
@@ -77,10 +78,10 @@ echo "================ This will start chaincode container ================"
 --version $CC_VERSION \
 --sequence $SEQUENCE \
 --init-required \
---tls $CORE_PEER_TLS_ENABLED \
---cafile $ORDERER_CA \
 --peerAddresses peer0.org1.example.com:7051 \
---tlsRootCertFiles $CORE_PEER_TLS_ROOTCERT_FILE
+--tlsRootCertFiles $CORE_PEER_TLS_ROOTCERT_FILE \
+# --tls $CORE_PEER_TLS_ENABLED \
+# --cafile $ORDERER_CA \
 
 
 
@@ -93,26 +94,26 @@ echo "================ INVOKE CHAINCODE (INIT FUNCTION) ================"
 ../../../new-bin/peer chaincode invoke \
 -o $ORDERER_HOST:7050 \
 --isInit \
---tls false \
---cafile $ORDERER_CA \
 -C $CHANNEL_NAME \
 -n $CC_NAME \
 --peerAddresses peer0.org1.example.com:7051 \
 --tlsRootCertFiles $CORE_PEER_TLS_ROOTCERT_FILE \
 -c '{"Args":["Init"]}' \
---waitForEvent
+--waitForEvent \
+# --tls $CORE_PEER_TLS_ENABLED \
+# --cafile $ORDERER_CA \
 
 echo "================ TEST INVOKE CHAINCODE ================"
 ../../../new-bin/peer  chaincode invoke \
 -o $ORDERER_HOST:7050 \
---tls $CORE_PEER_TLS_ENABLED \
---cafile $ORDERER_CA \
 -C $CHANNEL_NAME \
 -n $CC_NAME \
 --peerAddresses peer0.org1.example.com:7051 \
 --tlsRootCertFiles $CORE_PEER_TLS_ROOTCERT_FILE \
 -c '{"Args":["update","myvar","100","+"]}' \
---waitForEvent
+# --waitForEvent \
+# --tls $CORE_PEER_TLS_ENABLED \
+# --cafile $ORDERER_CA \
 
 echo "================ TEST QUERY CHAINCODE ================"
 ../../../new-bin/peer chaincode query \

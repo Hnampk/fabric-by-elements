@@ -49,7 +49,7 @@
       Template:
         Count: 1
         SANS:
-          - localhost
+          - peer0.org1.example.com
         # Start: 5
         # Hostname: {{.Prefix}}{{.Index}} # default
       # ---------------------------------------------------------------------------
