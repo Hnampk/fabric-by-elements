@@ -22,6 +22,12 @@ import (
 	"google.golang.org/grpc"
 )
 
+type ClientWorker struct {
+	id              int
+	invokeChannel   chan InvokeRequest
+	responseChannel chan string
+}
+
 type InvokeRequest struct {
 	FuncName string
 	Args     []string
@@ -36,28 +42,19 @@ type ProposalWrapper struct {
 	Prop     RawProposal
 	Response ProposalResponse
 }
-
 type RawProposal *peer.Proposal
-
 type ProposalResponse *pb.ProposalResponse
 
-var configFile string = "network.yaml"
-var adminUser string = "Admin"
-var OrgName string = "org1"
-var org1User string = "Admin"
-var channelID string = "vnpay-channel"
-var chainCodeID string = "mycc"
-
 const workerNum = 20 // number of Client
-
-type ClientWorker struct {
-	id              int
-	invokeChannel   chan InvokeRequest
-	responseChannel chan string
-}
-
 var invokeChannel chan InvokeRequest
 var responseChannel chan string
+
+const configFile string = "network.yaml"
+const adminUser string = "Admin"
+const OrgName string = "org1"
+const org1User string = "Admin"
+const channelID string = "vnpay-channel"
+const chainCodeID string = "mycc"
 
 var ctx = context.Background()
 var rdb *redis.Client
@@ -120,7 +117,8 @@ func (c *ClientWorker) start() {
 			c.responseChannel <- result
 		}
 
-		continue
+		close(responseChannel)
+		close(triggerStop)
 	}
 }
 
@@ -169,6 +167,8 @@ func (c *ClientWorker) exec(args [][]byte, responseChannel chan string, timeout 
 
 	if err != nil {
 		fmt.Println("[ERROR] NewSigner:", err)
+		responseChannel <- "Timeout" // fix me
+		return
 	}
 
 	testInput := pb.ChaincodeInput{
@@ -188,6 +188,8 @@ func (c *ClientWorker) exec(args [][]byte, responseChannel chan string, timeout 
 	creator, err := signer.Serialize()
 	if err != nil {
 		fmt.Println("[ERROR] Serialize:", err)
+		responseChannel <- "Timeout" // fix me
+		return
 	}
 
 	// extract the transient field if it exists
@@ -199,12 +201,16 @@ func (c *ClientWorker) exec(args [][]byte, responseChannel chan string, timeout 
 	prop, txid, err := protoutil.CreateChaincodeProposalWithTxIDAndTransient(pcommon.HeaderType_ENDORSER_TRANSACTION, cID, invocation, creator, txID, tMap)
 	if err != nil {
 		fmt.Println("[ERROR]: CreateChaincodeProposalWithTxIDAndTransient", err)
+		responseChannel <- "Timeout" // fix me
+		return
 	}
 	fmt.Println("TXID:", txid)
 
 	signedProp, err := protoutil.GetSignedProposal(prop, signer)
 	if err != nil {
 		fmt.Println("[ERROR]: GetSignedProposal", err)
+		responseChannel <- "Timeout" // fix me
+		return
 	}
 
 	cc, _ := grpc.Dial("peer0.org1.example.com:7051", grpc.WithInsecure())
@@ -234,6 +240,8 @@ func (c *ClientWorker) exec(args [][]byte, responseChannel chan string, timeout 
 
 	rdb.RPush(ctx, "pending-proposals", responseByte)
 	responseChannel <- string(responses[0].Response.Payload)
+	fmt.Println("return deeeee")
+	return
 }
 
 // processProposals sends a signed proposal to a set of peers, and gathers all the responses.
@@ -277,7 +285,6 @@ func send(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.Unmarshal(redisData, &proposalWrapper)
-
 	rawProposal := proposalWrapper.Prop
 	proposalResponse := proposalWrapper.Response
 
@@ -330,7 +337,6 @@ func send(w http.ResponseWriter, r *http.Request) {
 		// 	}
 		// }
 
-		// _, _, _, err := configFromEnv("orderer")
 		address := "orderer.example.com:7050"
 		// override := ""
 		clientConfig := comm.ClientConfig{}
