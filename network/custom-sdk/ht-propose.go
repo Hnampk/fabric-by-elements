@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
-
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
+	"github.com/go-redis/redis/v8"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pcommon "github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/peer"
@@ -32,10 +32,14 @@ type QueryRequest struct {
 	Name     string
 }
 
-type ProposalResponse struct {
-	prop     *peer.Proposal
-	response *pb.ProposalResponse
+type ProposalWrapper struct {
+	Prop     RawProposal
+	Response ProposalResponse
 }
+
+type RawProposal *peer.Proposal
+
+type ProposalResponse *pb.ProposalResponse
 
 var configFile string = "network.yaml"
 var adminUser string = "Admin"
@@ -54,9 +58,17 @@ type ClientWorker struct {
 
 var invokeChannel chan InvokeRequest
 var responseChannel chan string
-var proposalResponses []ProposalResponse
+
+var ctx = context.Background()
+var rdb *redis.Client
 
 func main() {
+	// redis setup
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 
 	invokeChannel = make(chan InvokeRequest)
 	responseChannel = make(chan string)
@@ -203,11 +215,24 @@ func (c *ClientWorker) exec(args [][]byte, responseChannel chan string, timeout 
 	// response payload
 	responses, err := processProposals(mockClients, signedProp)
 	if err != nil || len(responses) < 1 {
-		responseChannel <- "Timeout"
+		responseChannel <- "Timeout" // fix me
 		return
 	}
 
-	proposalResponses = append(proposalResponses, ProposalResponse{prop: prop, response: responses[0]})
+	rawProposal := RawProposal(prop)
+	proposalResponse := ProposalResponse(responses[0])
+	response := ProposalWrapper{Prop: rawProposal, Response: proposalResponse}
+
+	// save byte slice into Redis
+	responseByte, err := json.Marshal(response)
+
+	if err != nil {
+		fmt.Println("error:", err.Error())
+		responseChannel <- "Timeout" // fix me
+		return
+	}
+
+	rdb.RPush(ctx, "pending-proposals", responseByte)
 	responseChannel <- string(responses[0].Response.Payload)
 }
 
@@ -243,17 +268,21 @@ func processProposals(endorserClients []pb.EndorserClient, signedProposal *pb.Si
 
 func send(w http.ResponseWriter, r *http.Request) {
 	// send the first signed proposal response
-	if len(proposalResponses) < 1 {
+	var proposalWrapper ProposalWrapper
+	redisData, err := rdb.LPop(ctx, "pending-proposals").Bytes()
+
+	if err != nil {
 		http.Error(w, "No more pending proposal response!", 500)
 		return
 	}
-	var proposalResponse ProposalResponse
-	proposalResponse, proposalResponses = proposalResponses[0], proposalResponses[1:]
 
-	proposalResp := proposalResponse.response
+	json.Unmarshal(redisData, &proposalWrapper)
 
-	if proposalResp != nil {
-		if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
+	rawProposal := proposalWrapper.Prop
+	proposalResponse := proposalWrapper.Response
+
+	if &proposalResponse != nil {
+		if proposalResponse.Response.Status >= shim.ERRORTHRESHOLD {
 			http.Error(w, "shim.ERRORTHRESHOLD", 500)
 			return
 		}
@@ -265,10 +294,16 @@ func send(w http.ResponseWriter, r *http.Request) {
 		}
 
 		signer, err := signerLib.NewSigner(signerConfig)
+		if err != nil {
+			fmt.Println("ERROR NewSigner", err)
+			http.Error(w, "ERROR NewSigner", 500)
+			return
+		}
 
 		// assemble a signed transaction (it's an Envelope message)
-		env, err := protoutil.CreateSignedTx(proposalResponse.prop, signer, proposalResp)
+		env, err := protoutil.CreateSignedTx(rawProposal, signer, proposalResponse)
 		if err != nil {
+			fmt.Println("ERROR CreateSignedTx", err)
 			http.Error(w, "could not assemble transaction", 500)
 			return
 		}
@@ -326,15 +361,6 @@ func send(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		fmt.Println("bc==================", bc)
-
-		something, err := broadcastClient.Client.Header()
-		if err != nil {
-			fmt.Println("ERR CMNR", err)
-		}
-
-		fmt.Println(something)
-		fmt.Println("bc==================", bc)
 		// if dg != nil && ctx != nil {
 		// 	// wait for event that contains the txid from all peers
 		// 	err = dg.Wait(ctx)
@@ -349,6 +375,6 @@ func send(w http.ResponseWriter, r *http.Request) {
 }
 
 func count(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("proposalResponses has", len(proposalResponses), "elements")
-	fmt.Fprint(w, len(proposalResponses))
+	// fmt.Println("proposalResponses has", len(proposalResponses), "elements")
+	// fmt.Fprint(w, len(proposalResponses))
 }
