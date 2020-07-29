@@ -1,206 +1,228 @@
-// package main
+package main
 
-// import (
-// 	"context"
-// 	"encoding/json"
-// 	"fmt"
-// 	"time"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
 
-// 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
-// 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
-// 	"github.com/go-redis/redis/v8"
-// 	"github.com/hyperledger/fabric-chaincode-go/shim"
-// 	"github.com/hyperledger/fabric-protos-go/peer"
-// 	pb "github.com/hyperledger/fabric-protos-go/peer"
-// 	signerLib "github.com/hyperledger/fabric/cmd/common/signer"
+	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
+	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
+	"github.com/go-redis/redis/v8"
+	"github.com/hyperledger/fabric-chaincode-go/shim"
+	"github.com/hyperledger/fabric-protos-go/peer"
+	pb "github.com/hyperledger/fabric-protos-go/peer"
+	signerLib "github.com/hyperledger/fabric/cmd/common/signer"
 
-// 	"github.com/hyperledger/fabric/protoutil"
-// )
+	"github.com/hyperledger/fabric/protoutil"
+)
 
-// type ClientWorker struct {
-// 	id int
-// 	// invokeChannel   chan InvokeRequest
-// 	// responseChannel chan string
-// }
+type ClientWorker struct {
+	id int
+	// invokeChannel   chan InvokeRequest
+	// responseChannel chan string
+}
 
-// type InvokeRequest struct {
-// 	FuncName string
-// 	Args     []string
-// }
+type InvokeRequest struct {
+	FuncName string
+	Args     []string
+}
 
-// type QueryRequest struct {
-// 	FuncName string
-// 	Name     string
-// }
+type QueryRequest struct {
+	FuncName string
+	Name     string
+}
 
-// type ProposalWrapper struct {
-// 	Prop     RawProposal
-// 	Response ProposalResponse
-// }
-// type RawProposal *peer.Proposal
-// type ProposalResponse *pb.ProposalResponse
+type ProposalWrapper struct {
+	Prop     RawProposal
+	Response ProposalResponse
+}
+type RawProposal *peer.Proposal
+type ProposalResponse *pb.ProposalResponse
 
-// const workerNum = 100 // number of Client
-// var invokeChannel chan InvokeRequest
-// var responseChannel chan string
+var workerNum int // number of Client
+var loop int
+var invokeChannel chan InvokeRequest
+var responseChannel chan string
 
-// const configFile string = "network.yaml"
-// const adminUser string = "Admin"
-// const OrgName string = "org1"
-// const org1User string = "Admin"
-// const channelID string = "vnpay-channel"
-// const chainCodeID string = "mycc"
+const configFile string = "network.yaml"
+const adminUser string = "Admin"
+const OrgName string = "org1"
+const org1User string = "Admin"
+const channelID string = "vnpay-channel"
+const chainCodeID string = "mycc"
 
-// var ctx = context.Background()
-// var rdb *redis.Client
+const rootURL string = "/home/ewallet/network/"
 
-// func main() {
-// 	// redis setup
-// 	rdb = redis.NewClient(&redis.Options{
-// 		Addr:     "localhost:6379",
-// 		Password: "", // no password set
-// 		DB:       0,  // use default DB
-// 	})
+// const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
 
-// 	invokeChannel = make(chan InvokeRequest)
-// 	responseChannel = make(chan string)
-// 	channelInside := make(chan int)
+var ctx = context.Background()
+var rdb *redis.Client
 
-// 	// create a new handler
-// 	start := time.Now()
+func main() {
+	var err error
+	workerNum, err = strconv.Atoi(os.Args[1])
+	if err != nil {
+		fmt.Println("Please enter the Number of connections")
+		return
+	}
 
-// 	for i := 0; i < workerNum; i++ {
+	loop, err = strconv.Atoi(os.Args[2])
+	if err != nil {
+		fmt.Println("Please enter the Number of loops per connection")
+		return
+	}
 
-// 		worker := ClientWorker{
-// 			id: i,
-// 			// invokeChannel:   invokeChannel,
-// 			// responseChannel: responseChannel,
-// 		}
+	// redis setup
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 
-// 		go worker.start(channelInside)
+	invokeChannel = make(chan InvokeRequest)
+	responseChannel = make(chan string)
+	channelInside := make(chan int)
 
-// 		fmt.Println(">>>>>>>>>>>>>>[CUSTOM]Started Client ", worker)
-// 	}
+	for i := 0; i < workerNum; i++ {
 
-// 	for i := 0; i < workerNum; i++ {
-// 		<-channelInside
-// 	}
+		worker := ClientWorker{
+			id: i,
+			// invokeChannel:   invokeChannel,
+			// responseChannel: responseChannel,
+		}
 
-// 	fmt.Println("duration: ", time.Now().Sub(start))
-// }
+		go worker.start(channelInside)
 
-// func (c *ClientWorker) start(channelInside chan int) {
-// 	loop := 300
+		fmt.Println(">>>>>>>>>>>>>>[CUSTOM]Started Client ", worker)
+	}
+	fmt.Println("START")
 
-// 	// send
-// 	for i := 0; i < loop; i++ {
-// 		send()
-// 	}
+	// create a new handler
+	start := time.Now()
 
-// 	channelInside <- 1
-// }
+	for i := 0; i < workerNum; i++ {
+		<-channelInside
+	}
 
-// func send() {
-// 	// send the first signed proposal response
-// 	var proposalWrapper ProposalWrapper
-// 	redisData, err := rdb.LPop(ctx, "pending-proposals").Bytes()
+	fmt.Println("duration: ", time.Now().Sub(start))
+}
 
-// 	if err != nil {
-// 		fmt.Println("No more pending proposal response!", 500)
-// 		return
-// 	}
+func (c *ClientWorker) start(channelInside chan int) {
 
-// 	json.Unmarshal(redisData, &proposalWrapper)
-// 	rawProposal := proposalWrapper.Prop
-// 	proposalResponse := proposalWrapper.Response
+	address := "orderer.example.com:7050"
+	// address := "10.22.7.230:7050"
+	// override := ""
+	clientConfig := comm.ClientConfig{}
+	clientConfig.Timeout = 3 * time.Second
+	secOpts := comm.SecureOptions{}
+	clientConfig.SecOpts = secOpts
 
-// 	if &proposalResponse != nil {
-// 		if proposalResponse.Response.Status >= shim.ERRORTHRESHOLD {
-// 			fmt.Println("shim.ERRORTHRESHOLD", 500)
-// 			return
-// 		}
+	gClient, err := comm.NewGRPCClient(clientConfig)
 
-// 		signerConfig := signerLib.Config{
-// 			MSPID:        "Org1MSP",
-// 			IdentityPath: "/home/nampkh/nampkh/my-fabric/network/peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
-// 			KeyPath:      "/home/nampkh/nampkh/my-fabric/network/peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
-// 		}
+	if err != nil {
+		fmt.Println("[ERROR] failed to load config for OrdererClient")
+		return
+	}
 
-// 		signer, err := signerLib.NewSigner(signerConfig)
-// 		if err != nil {
-// 			fmt.Println("ERROR NewSigner", err)
-// 			return
-// 		}
+	oc := &common.OrdererClient{
+		CommonClient: common.CommonClient{
+			GRPCClient: gClient,
+			Address:    address,
+			// sn:         override
+		}}
 
-// 		// assemble a signed transaction (it's an Envelope message)
-// 		env, err := protoutil.CreateSignedTx(rawProposal, signer, proposalResponse)
-// 		if err != nil {
-// 			fmt.Println("ERROR CreateSignedTx", err)
-// 			return
-// 		}
+	bc, err := oc.Broadcast()
 
-// 		// var dg *DeliverGroup
-// 		// var ctx context.Context
-// 		// if waitForEvent {
-// 		// 	var cancelFunc context.CancelFunc
-// 		// 	ctx, cancelFunc = context.WithTimeout(context.Background(), waitForEventTimeout)
-// 		// 	defer cancelFunc()
+	broadcastClient := &common.BroadcastGRPCClient{Client: bc}
+	defer broadcastClient.Close()
 
-// 		// 	dg = NewDeliverGroup(
-// 		// 		deliverClients,
-// 		// 		peerAddresses,
-// 		// 		signer,
-// 		// 		certificate,
-// 		// 		channelID,
-// 		// 		txid,
-// 		// 	)
-// 		// 	// connect to deliver service on all peers
-// 		// 	err := dg.Connect(ctx)
-// 		// 	if err != nil {
-// 		// 		return nil, err
-// 		// 	}
-// 		// }
+	signerConfig := signerLib.Config{
+		MSPID:        "Org1MSP",
+		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
+		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
+	}
 
-// 		// address := "orderer.example.com:7050"
-// 		address := "10.22.7.230:7050"
-// 		// override := ""
-// 		clientConfig := comm.ClientConfig{}
-// 		clientConfig.Timeout = 3 * time.Second
-// 		secOpts := comm.SecureOptions{}
-// 		clientConfig.SecOpts = secOpts
+	signer, err := signerLib.NewSigner(signerConfig)
+	if err != nil {
+		fmt.Println("ERROR NewSigner", err)
+		return
+	}
 
-// 		if err != nil {
-// 			fmt.Println("[ERROR] failed to load config for OrdererClient")
-// 			return
-// 		}
+	// send
+	for i := 0; i < loop; i++ {
+		send(broadcastClient, signer)
+	}
 
-// 		gClient, err := comm.NewGRPCClient(clientConfig)
+	channelInside <- 1
+}
 
-// 		oc := &common.OrdererClient{
-// 			CommonClient: common.CommonClient{
-// 				GRPCClient: gClient,
-// 				Address:    address,
-// 				// sn:         override
-// 			}}
+func send(broadcastClient *common.BroadcastGRPCClient, signer *signerLib.Signer) {
+	// send the first signed proposal response
+	var proposalWrapper ProposalWrapper
+	redisData, err := rdb.LPop(ctx, "pending-proposals").Bytes()
 
-// 		bc, err := oc.Broadcast()
+	if err != nil {
+		fmt.Println("No more pending proposal response!", 500)
+		return
+	}
 
-// 		broadcastClient := &common.BroadcastGRPCClient{Client: bc}
-// 		// send the envelope for ordering
-// 		if err = broadcastClient.Send(env); err != nil {
-// 			fmt.Println("error sending transaction for update function", 500)
-// 			broadcastClient.Close()
-// 			return
-// 		}
-// 		broadcastClient.Close()
-// 		// if dg != nil && ctx != nil {
-// 		// 	// wait for event that contains the txid from all peers
-// 		// 	err = dg.Wait(ctx)
-// 		// 	if err != nil {
-// 		// 		return nil, err
-// 		// 	}
-// 		// }
-// 	}
-// 	fmt.Println("OK")
-// 	return
-// }
+	json.Unmarshal(redisData, &proposalWrapper)
+	rawProposal := proposalWrapper.Prop
+	proposalResponse := proposalWrapper.Response
+
+	if proposalResponse != nil {
+		if proposalResponse.Response.Status >= shim.ERRORTHRESHOLD {
+			fmt.Println("shim.ERRORTHRESHOLD", 500)
+			return
+		}
+
+		// assemble a signed transaction (it's an Envelope message)
+		env, err := protoutil.CreateSignedTx(rawProposal, signer, proposalResponse)
+		if err != nil {
+			fmt.Println("ERROR CreateSignedTx", err)
+			return
+		}
+
+		// var dg *DeliverGroup
+		// var ctx context.Context
+		// if waitForEvent {
+		// 	var cancelFunc context.CancelFunc
+		// 	ctx, cancelFunc = context.WithTimeout(context.Background(), waitForEventTimeout)
+		// 	defer cancelFunc()
+
+		// 	dg = NewDeliverGroup(
+		// 		deliverClients,
+		// 		peerAddresses,
+		// 		signer,
+		// 		certificate,
+		// 		channelID,
+		// 		txid,
+		// 	)
+		// 	// connect to deliver service on all peers
+		// 	err := dg.Connect(ctx)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// }
+
+		// send the envelope for ordering
+		if err = broadcastClient.Send(env); err != nil {
+			fmt.Println("error sending transaction for update function", 500)
+			// broadcastClient.Close()
+			return
+		}
+		// broadcastClient.Close()
+		// if dg != nil && ctx != nil {
+		// 	// wait for event that contains the txid from all peers
+		// 	err = dg.Wait(ctx)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// }
+		fmt.Println("OK")
+	}
+	return
+}

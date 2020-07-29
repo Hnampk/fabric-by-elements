@@ -17,12 +17,12 @@ export CORE_PEER_TLS_KEY_FILE=/home/nampkh/nampkh/my-fabric/network/peer/crypto-
 export CORE_PEER_TLS_ROOTCERT_FILE=/home/nampkh/nampkh/my-fabric/network/peer/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
 # Peer specific variabes
 export CORE_PEER_ID=peer0.org1.example.com
-export CORE_PEER_ADDRESS=localhost:7051
-export CORE_PEER_LISTENADDRESS=localhost:7051
+export CORE_PEER_ADDRESS=172.16.79.8:7051
+export CORE_PEER_LISTENADDRESS=172.16.79.8:7051
 export CORE_PEER_CHAINCODEADDRESS=172.16.79.8:7052
 export CORE_PEER_CHAINCODELISTENADDRESS=172.16.79.8:7052
-export CORE_PEER_GOSSIP_BOOTSTRAP=localhost:7051
-export CORE_PEER_GOSSIP_EXTERNALENDPOINT=localhost:7051
+export CORE_PEER_GOSSIP_BOOTSTRAP=172.16.79.8:7051
+export CORE_PEER_GOSSIP_EXTERNALENDPOINT=172.16.79.8:7051
 export CORE_PEER_LOCALMSPID=Org1MSP
 
 ../../bin/peer node start

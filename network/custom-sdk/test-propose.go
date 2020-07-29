@@ -1,225 +1,276 @@
-package main
+// package main
 
-import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"sync"
-	"time"
+// import (
+// 	"context"
+// 	"encoding/json"
+// 	"fmt"
+// 	"os"
+// 	"strconv"
+// 	"sync"
+// 	"time"
 
-	"github.com/go-redis/redis/v8"
-	pcommon "github.com/hyperledger/fabric-protos-go/common"
-	"github.com/hyperledger/fabric-protos-go/peer"
-	pb "github.com/hyperledger/fabric-protos-go/peer"
-	signerLib "github.com/hyperledger/fabric/cmd/common/signer"
+// 	redis "github.com/go-redis/redis/v8"
+// 	pcommon "github.com/hyperledger/fabric-protos-go/common"
+// 	"github.com/hyperledger/fabric-protos-go/peer"
+// 	pb "github.com/hyperledger/fabric-protos-go/peer"
+// 	signerLib "github.com/hyperledger/fabric/cmd/common/signer"
 
-	"github.com/hyperledger/fabric/protoutil"
-	"google.golang.org/grpc"
-)
+// 	"github.com/hyperledger/fabric/protoutil"
+// 	"google.golang.org/grpc"
+// )
 
-type ClientWorker struct {
-	id int
-	// invokeChannel   chan InvokeRequest
-	// responseChannel chan string
-}
+// type ClientWorker struct {
+// 	id int
+// 	// invokeChannel   chan InvokeRequest
+// 	// responseChannel chan string
+// }
 
-type InvokeRequest struct {
-	FuncName string
-	Args     []string
-}
+// type InvokeRequest struct {
+// 	FuncName string
+// 	Args     []string
+// }
 
-type QueryRequest struct {
-	FuncName string
-	Name     string
-}
+// type QueryRequest struct {
+// 	FuncName string
+// 	Name     string
+// }
 
-type ProposalWrapper struct {
-	Prop     RawProposal
-	Response ProposalResponse
-}
-type RawProposal *peer.Proposal
-type ProposalResponse *pb.ProposalResponse
+// type ProposalWrapper struct {
+// 	Prop     RawProposal
+// 	Response ProposalResponse
+// }
+// type RawProposal *peer.Proposal
+// type ProposalResponse *pb.ProposalResponse
 
-const workerNum = 200 // number of Client
-var invokeChannel chan InvokeRequest
-var responseChannel chan string
+// var workerNum int // number of Client
+// var loop int
+// var account string = "nam5"
+// var invokeChannel chan InvokeRequest
+// var responseChannel chan string
 
-const configFile string = "network.yaml"
-const adminUser string = "Admin"
-const OrgName string = "org1"
-const org1User string = "Admin"
-const channelID string = "vnpay-channel"
-const chainCodeID string = "mycc"
+// const configFile string = "network.yaml"
+// const adminUser string = "Admin"
+// const OrgName string = "org1"
+// const org1User string = "Admin"
+// const channelID string = "vnpay-channel"
+// const chainCodeID string = "mycc2"
 
-var ctx = context.Background()
-var rdb *redis.Client
+// // const rootURL string = "/home/ewallet/network/"
 
-func main() {
-	// redis setup
-	rdb = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
+// const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
 
-	invokeChannel = make(chan InvokeRequest)
-	responseChannel = make(chan string)
-	channelInside := make(chan int)
+// var ctx = context.Background()
+// var rdb *redis.Client
 
-	// create a new handler
+// func main() {
 
-	start := time.Now()
-	for i := 0; i < workerNum; i++ {
+// 	if len(os.Args) < 2 {
+// 		fmt.Println("Please enter the Number of connections")
+// 		return
+// 	}
 
-		worker := ClientWorker{
-			id: i,
-			// invokeChannel:   invokeChannel,
-			// responseChannel: responseChannel,
-		}
+// 	var err error
+// 	workerNum, err = strconv.Atoi(os.Args[1])
+// 	if err != nil {
+// 		fmt.Println("An error occurred: ", err)
+// 		return
+// 	}
 
-		go worker.start(channelInside)
+// 	if len(os.Args) < 3 {
+// 		fmt.Println("Please enter the Number of loop per connection")
+// 		return
+// 	}
 
-		fmt.Println(">>>>>>>>>>>>>>[CUSTOM]Started Client ", worker)
-	}
+// 	loop, err = strconv.Atoi(os.Args[2])
+// 	if err != nil {
+// 		fmt.Println("An error occurred: ", err)
+// 		return
+// 	}
 
-	for i := 0; i < workerNum; i++ {
-		<-channelInside
-	}
+// 	if len(os.Args) < 4 {
+// 		fmt.Println("Please enter the account")
+// 		return
+// 	}
 
-	fmt.Println("duration: ", time.Now().Sub(start))
-}
+// 	account = os.Args[3]
+// 	if err != nil {
+// 		fmt.Println("An error occurred: ", err)
+// 		return
+// 	}
 
-func (c *ClientWorker) start(channelInside chan int) {
-	loop := 300
+// 	// redis setup
+// 	rdb = redis.NewClient(&redis.Options{
+// 		Addr:     "localhost:6379",
+// 		Password: "", // no password set
+// 		DB:       0,  // use default DB
+// 	})
 
-	// invoke
-	fcn := "update"
-	args := [][]byte{[]byte(fcn), []byte("nam4"), []byte("1"), []byte("+")}
+// 	invokeChannel = make(chan InvokeRequest)
+// 	responseChannel = make(chan string)
+// 	channelInside := make(chan int)
 
-	responseChannel := make(chan []byte)
+// 	// create a new handler
 
-	for i := 0; i < loop; i++ {
-		c.exec(args, responseChannel)
-	}
+// 	var mainWait sync.WaitGroup
 
-	channelInside <- 1
-}
+// 	for i := 0; i < workerNum; i++ {
 
-func (c *ClientWorker) exec(args [][]byte, responseChannel chan []byte) {
-	signerConfig := signerLib.Config{
-		MSPID:        "Org1MSP",
-		IdentityPath: "/home/nampkh/nampkh/my-fabric/network/peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
-		KeyPath:      "/home/nampkh/nampkh/my-fabric/network/peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
-	}
+// 		worker := ClientWorker{
+// 			id: i,
+// 			// invokeChannel:   invokeChannel,
+// 			// responseChannel: responseChannel,
+// 		}
 
-	signer, err := signerLib.NewSigner(signerConfig)
+// 		mainWait.Add(1)
+// 		go worker.start(&mainWait, channelInside)
 
-	chaincodeLang := "GOLANG"
-	chaincodeName := "mycc"
+// 		fmt.Println(">>>>>>>>>>>>>>[CUSTOM]Started Client ", worker)
+// 	}
 
-	if err != nil {
-		fmt.Println("[ERROR] NewSigner:", err)
-		return
-	}
+// 	// mainWait.Wait()
+// 	start := time.Now()
+// 	for i := 0; i < workerNum; i++ {
+// 		<-channelInside
+// 	}
 
-	testInput := pb.ChaincodeInput{
-		IsInit: false,
-		Args:   args,
-	}
+// 	fmt.Println("duration: ", time.Now().Sub(start))
+// }
 
-	spec := &pb.ChaincodeSpec{
-		Type:        pb.ChaincodeSpec_Type(pb.ChaincodeSpec_Type_value[chaincodeLang]),
-		ChaincodeId: &pb.ChaincodeID{Name: chaincodeName},
-		Input:       &testInput,
-	}
+// func (c *ClientWorker) start(mainWait *sync.WaitGroup, channelInside chan int) {
 
-	// Build the ChaincodeInvocationSpec message
-	invocation := &pb.ChaincodeInvocationSpec{ChaincodeSpec: spec}
+// 	defer mainWait.Done()
+// 	// var connWait sync.WaitGroup
+// 	// connWait.Add(loop)
 
-	creator, err := signer.Serialize()
-	if err != nil {
-		fmt.Println("[ERROR] Serialize:", err)
-		return
-	}
+// 	// invoke
+// 	fcn := "update"
+// 	args := [][]byte{[]byte(fcn), []byte(account), []byte("1"), []byte("+")}
+// 	// args := [][]byte{[]byte(fcn)}
 
-	// extract the transient field if it exists
-	var tMap map[string][]byte
+// 	responseChannel := make(chan []byte)
 
-	cID := "vnpay-channel"
-	txID := ""
+// 	cc, _ := grpc.Dial("peer0.org1.example.com:7051", grpc.WithInsecure())
+// 	defer cc.Close()
+// 	endorser := pb.NewEndorserClient(cc)
+// 	endorserClients := []pb.EndorserClient{endorser}
 
-	prop, txid, err := protoutil.CreateChaincodeProposalWithTxIDAndTransient(pcommon.HeaderType_ENDORSER_TRANSACTION, cID, invocation, creator, txID, tMap)
-	if err != nil {
-		fmt.Println("[ERROR]: CreateChaincodeProposalWithTxIDAndTransient", err)
-		return
-	}
-	fmt.Println("TXID:", txid)
+// 	for i := 0; i < loop; i++ {
+// 		func() {
+// 			// defer connWait.Done()
+// 			c.exec(args, responseChannel, endorserClients)
+// 		}()
+// 	}
+// 	// connWait.Wait()
 
-	signedProp, err := protoutil.GetSignedProposal(prop, signer)
-	if err != nil {
-		fmt.Println("[ERROR]: GetSignedProposal", err)
-		return
-	}
+// 	channelInside <- 1
+// }
 
-	// cc, _ := grpc.Dial("peer0.org1.example.com:7051", grpc.WithInsecure())
-	cc, _ := grpc.Dial("10.22.7.231:7051", grpc.WithInsecure())
-	endorser := pb.NewEndorserClient(cc)
-	mockClients := []pb.EndorserClient{endorser}
+// func (c *ClientWorker) exec(args [][]byte, responseChannel chan []byte, endorserClients []pb.EndorserClient) {
+// 	signerConfig := signerLib.Config{
+// 		MSPID:        "Org1MSP",
+// 		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
+// 		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
+// 	}
 
-	// response payload
-	responses, err := processProposals(mockClients, signedProp)
-	if err != nil || len(responses) < 1 {
-		// responseChannel <- "Timeout" // fix me
-		cc.Close()
-		return
-	}
-	cc.Close()
+// 	signer, err := signerLib.NewSigner(signerConfig)
 
-	rawProposal := RawProposal(prop)
-	proposalResponse := ProposalResponse(responses[0])
-	response := ProposalWrapper{Prop: rawProposal, Response: proposalResponse}
+// 	chaincodeLang := "GOLANG"
+// 	chaincodeName := "mycc"
 
-	// save byte slice into Redis
-	responseByte, err := json.Marshal(response)
+// 	if err != nil {
+// 		fmt.Println("[ERROR] NewSigner:", err)
+// 		return
+// 	}
 
-	if err != nil {
-		fmt.Println("error:", err.Error())
-		// responseChannel <- "Timeout" // fix me
-		return
-	}
-	// fmt.Println(responseByte)
+// 	testInput := pb.ChaincodeInput{
+// 		IsInit: false,
+// 		Args:   args,
+// 	}
 
-	rdb.RPush(ctx, "pending-proposals", responseByte)
-	// responseChannel <- responseByte
-	return
-}
+// 	spec := &pb.ChaincodeSpec{
+// 		Type:        pb.ChaincodeSpec_Type(pb.ChaincodeSpec_Type_value[chaincodeLang]),
+// 		ChaincodeId: &pb.ChaincodeID{Name: chaincodeName},
+// 		Input:       &testInput,
+// 	}
 
-// processProposals sends a signed proposal to a set of peers, and gathers all the responses.
-func processProposals(endorserClients []pb.EndorserClient, signedProposal *pb.SignedProposal) ([]*pb.ProposalResponse, error) {
-	responsesCh := make(chan *pb.ProposalResponse, len(endorserClients))
-	errorCh := make(chan error, len(endorserClients))
-	wg := sync.WaitGroup{}
-	for _, endorser := range endorserClients {
-		wg.Add(1)
-		go func(endorser pb.EndorserClient) {
-			defer wg.Done()
-			proposalResp, err := endorser.ProcessProposal(context.Background(), signedProposal)
-			if err != nil {
-				errorCh <- err
-				return
-			}
-			responsesCh <- proposalResp
-		}(endorser)
-	}
-	wg.Wait()
-	close(responsesCh)
-	close(errorCh)
-	for err := range errorCh {
-		return nil, err
-	}
-	var responses []*pb.ProposalResponse
-	for response := range responsesCh {
-		responses = append(responses, response)
-	}
-	return responses, nil
-}
+// 	// Build the ChaincodeInvocationSpec message
+// 	invocation := &pb.ChaincodeInvocationSpec{ChaincodeSpec: spec}
+
+// 	creator, err := signer.Serialize()
+// 	if err != nil {
+// 		fmt.Println("[ERROR] Serialize:", err)
+// 		return
+// 	}
+
+// 	// extract the transient field if it exists
+// 	var tMap map[string][]byte
+
+// 	cID := "vnpay-channel"
+// 	txID := ""
+
+// 	prop, txid, err := protoutil.CreateChaincodeProposalWithTxIDAndTransient(pcommon.HeaderType_ENDORSER_TRANSACTION, cID, invocation, creator, txID, tMap)
+// 	if err != nil {
+// 		fmt.Println("[ERROR]: CreateChaincodeProposalWithTxIDAndTransient", err)
+// 		return
+// 	}
+
+// 	signedProp, err := protoutil.GetSignedProposal(prop, signer)
+// 	if err != nil {
+// 		fmt.Println("[ERROR]: GetSignedProposal", err)
+// 		return
+// 	}
+
+// 	// response payload
+// 	responses, err := processProposals(endorserClients, signedProp)
+// 	if err != nil || len(responses) < 1 {
+// 		// 	// responseChannel <- "Timeout" // fix me
+// 		fmt.Println("ERROR occured!", err)
+// 		return
+// 	}
+
+// 	fmt.Println("TXID:", time.Now(), txid)
+// 	rawProposal := RawProposal(prop)
+// 	proposalResponse := ProposalResponse(responses[0])
+// 	response := ProposalWrapper{Prop: rawProposal, Response: proposalResponse}
+
+// 	// save byte slice into Redis
+// 	responseByte, err := json.Marshal(response)
+
+// 	if err != nil {
+// 		fmt.Println("error:", err.Error())
+// 		return
+// 	}
+
+// 	rdb.RPush(ctx, "pending-proposals", responseByte)
+// 	return
+// }
+
+// // processProposals sends a signed proposal to a set of peers, and gathers all the responses.
+// func processProposals(endorserClients []pb.EndorserClient, signedProposal *pb.SignedProposal) ([]*pb.ProposalResponse, error) {
+// 	responsesCh := make(chan *pb.ProposalResponse, len(endorserClients))
+// 	errorCh := make(chan error, len(endorserClients))
+// 	wg := sync.WaitGroup{}
+// 	for _, endorser := range endorserClients {
+// 		wg.Add(1)
+// 		go func(endorser pb.EndorserClient) {
+// 			defer wg.Done()
+// 			proposalResp, err := endorser.ProcessProposal(context.Background(), signedProposal)
+// 			if err != nil {
+// 				errorCh <- err
+// 				return
+// 			}
+// 			responsesCh <- proposalResp
+// 		}(endorser)
+// 	}
+// 	wg.Wait()
+// 	close(responsesCh)
+// 	close(errorCh)
+// 	for err := range errorCh {
+// 		return nil, err
+// 	}
+// 	var responses []*pb.ProposalResponse
+// 	for response := range responsesCh {
+// 		responses = append(responses, response)
+// 	}
+// 	return responses, nil
+// }

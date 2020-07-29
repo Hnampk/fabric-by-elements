@@ -39,7 +39,7 @@ PACKAGE_ID=`sed -n '/Package/{s/^Package ID: //; s/, Label:.*$//; p;}' $PKG_DIR/
 rm $PKG_DIR/log.txt
 
 
-SEQUENCE=2
+SEQUENCE=1
 
 echo "================ APPROVE CHAINCODE ================"
 ../../../new-bin/peer lifecycle chaincode approveformyorg \
@@ -62,9 +62,9 @@ echo "================ CHECK COMMIT READINESS ================"
 --version $CC_VERSION \
 --init-required \
 --sequence $SEQUENCE \
---tls $CORE_PEER_TLS_ENABLED \
---cafile $ORDERER_CA \
---output json
+--output json \
+# --tls $CORE_PEER_TLS_ENABLED \
+# --cafile $ORDERER_CA \
 
 
 
