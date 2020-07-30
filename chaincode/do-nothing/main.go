@@ -35,6 +35,12 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) pb.Response 
 }
 
 func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
+	// trigger event for listener
+	eventErr := APIstub.SetEvent("updateEvent", []byte("event-hello"))
+	if eventErr != nil {
+		return shim.Error(fmt.Sprintf("Failed to emit event"))
+	}
+
 	return shim.Success([]byte(fmt.Sprintf("Invoke success!")))
 }
 

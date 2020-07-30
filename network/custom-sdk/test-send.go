@@ -47,13 +47,7 @@ var loop int
 var invokeChannel chan InvokeRequest
 var responseChannel chan string
 
-const configFile string = "network.yaml"
-const adminUser string = "Admin"
-const OrgName string = "org1"
-const org1User string = "Admin"
 const channelID string = "vnpay-channel"
-const chainCodeID string = "mycc"
-
 const rootURL string = "/home/ewallet/network/"
 
 // const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
