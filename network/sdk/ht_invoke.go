@@ -44,7 +44,7 @@ var org1User string = "Admin"
 var channelID string = "vnpay-channel"
 var chainCodeID string = "mycc"
 
-const workerNum = 20 // number of Client
+const workerNum = 100 // number of Client
 
 type ClientWorker struct {
 	id              int
@@ -141,65 +141,6 @@ func (c *ClientWorker) start() {
 		}
 
 		continue
-
-		// registration, notifier, err := c.eventListener.RegisterChaincodeEvent(chainCodeID, "updateEvent")
-
-		// if err != nil {
-		// 	fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
-		// 	c.responseChannel <- err.Error()
-		// 	c.eventListener.Unregister(registration)
-		// 	continue
-		// }
-		// // defer c.eventListener.Unregister(registration)
-
-		// req := channel.Request{ChaincodeID: chainCodeID, Fcn: fcn, Args: args}
-
-		// response, err := c.client.Execute(req, channel.WithTargetEndpoints("peer0.org1.example.com"))
-		// if err != nil {
-		// 	fmt.Println(">>>>>>>>>>>>>>[CUSTOM]failed to query chaincode: ", err)
-		// 	c.responseChannel <- err.Error()
-		// 	c.eventListener.Unregister(registration)
-		// 	continue
-		// }
-
-		// fmt.Println(string("txid: " + response.TransactionID))
-		// // iterate until receive the exact transactionID event
-
-		// var count int
-		// func() {
-		// 	timeOutChannel := make(chan string)
-
-		// 	go timeOutChecker(timeOutChannel)
-		// 	// select {
-		// 	// case <-timeOutChannel:
-		// 	// 	c.responseChannel <- "Timeout"
-		// 	// 	c.eventListener.Unregister(registration)
-		// 	// 	return
-
-		// 	// }
-		// 	test := <-time.After(time.Millisecond * 5)
-
-		// 	for {
-		// 		select {
-		// 		case ccEvent := <-notifier:
-
-		// 			if ccEvent.TxID != string(response.TransactionID) {
-		// 				count++
-		// 				continue
-		// 			}
-
-		// 			c.responseChannel <- "OK after receive " + strconv.Itoa(count) + " events, served by clientId: " + strconv.Itoa(c.id)
-		// 			c.eventListener.Unregister(registration)
-
-		// 			return
-		// 		case <- test:
-		// 			c.responseChannel <- "Timeout"
-		// 			c.eventListener.Unregister(registration)
-
-		// 			return
-		// 		}
-		// 	}
-		// }()
 
 	}
 }
