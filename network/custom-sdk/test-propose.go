@@ -36,6 +36,7 @@ type QueryRequest struct {
 }
 
 type ProposalWrapper struct {
+	TxID     string
 	Prop     RawProposal
 	Response ProposalResponse
 }
@@ -44,14 +45,15 @@ type ProposalResponse *pb.ProposalResponse
 
 var workerNum int // number of Client
 var loop int
-var account string = "nam5"
+var account string = "nam1"
 var invokeChannel chan InvokeRequest
 var responseChannel chan string
 
-const chaincodeName string = "mycc3"
-const rootURL string = "/home/ewallet/network/"
+const chaincodeName string = "mycc"
 
-// const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
+// const rootURL string = "/home/ewallet/network/"
+
+const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
 
 var ctx = context.Background()
 var rdb *redis.Client
@@ -229,7 +231,7 @@ func (c *ClientWorker) exec(args [][]byte, responseChannel chan []byte, endorser
 	fmt.Println("TXID:", time.Now(), txid)
 	rawProposal := RawProposal(prop)
 	proposalResponse := ProposalResponse(responses[0])
-	response := ProposalWrapper{Prop: rawProposal, Response: proposalResponse}
+	response := ProposalWrapper{TxID: txid, Prop: rawProposal, Response: proposalResponse}
 
 	// save byte slice into Redis
 	responseByte, err := json.Marshal(response)

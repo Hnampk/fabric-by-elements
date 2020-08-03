@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 
+	"example.com/custom-sdk/fabric/usable-inter-nal/peer/chaincode"
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
+	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/identity"
 	"github.com/go-redis/redis/v8"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	"github.com/hyperledger/fabric-protos-go/peer"
@@ -36,6 +39,7 @@ type QueryRequest struct {
 }
 
 type ProposalWrapper struct {
+	TxID     string
 	Prop     RawProposal
 	Response ProposalResponse
 }
@@ -48,9 +52,11 @@ var invokeChannel chan InvokeRequest
 var responseChannel chan string
 
 const channelID string = "vnpay-channel"
-const rootURL string = "/home/ewallet/network/"
 
-// const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
+// const rootURL string = "/home/ewallet/network/"
+
+const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
+const waitForEvent = true
 
 var ctx = context.Background()
 var rdb *redis.Client
@@ -159,11 +165,12 @@ func send(broadcastClient *common.BroadcastGRPCClient, signer *signerLib.Signer)
 	redisData, err := rdb.LPop(ctx, "pending-proposals").Bytes()
 
 	if err != nil {
-		fmt.Println("No more pending proposal response!", 500)
+		fmt.Println("No more pending proposal response!", err)
 		return
 	}
 
 	json.Unmarshal(redisData, &proposalWrapper)
+	txid := proposalWrapper.TxID
 	rawProposal := proposalWrapper.Prop
 	proposalResponse := proposalWrapper.Response
 
@@ -180,43 +187,91 @@ func send(broadcastClient *common.BroadcastGRPCClient, signer *signerLib.Signer)
 			return
 		}
 
-		// var dg *DeliverGroup
-		// var ctx context.Context
-		// if waitForEvent {
-		// 	var cancelFunc context.CancelFunc
-		// 	ctx, cancelFunc = context.WithTimeout(context.Background(), waitForEventTimeout)
-		// 	defer cancelFunc()
+		var dg *chaincode.DeliverGroup
 
-		// 	dg = NewDeliverGroup(
-		// 		deliverClients,
-		// 		peerAddresses,
-		// 		signer,
-		// 		certificate,
-		// 		channelID,
-		// 		txid,
-		// 	)
-		// 	// connect to deliver service on all peers
-		// 	err := dg.Connect(ctx)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// }
+		if waitForEvent {
+			deliverClients := []pb.DeliverClient{}
+
+			deliverClient, err := common.GetPeerDeliverClientFnc("peer0.org1.example.com:7051", "tlsRootCertFile")
+			if err != nil {
+				fmt.Println("error getting deliver client for", err)
+				return
+			}
+			deliverClients = append(deliverClients, deliverClient)
+			certificate, err := common.GetCertificateFnc()
+			// connect to deliver service on all peers
+			if err != nil {
+				fmt.Println("error GetCertificateFnc", err)
+				return
+			}
+
+			// waitForEventTimeout := 30 * time.Second
+			// var cancelFunc context.CancelFunc
+			// ctx, cancelFunc = context.WithTimeout(context.Background(), waitForEventTimeout)
+			// defer cancelFunc()
+
+			dg = NewDeliverGroup(
+				deliverClients,
+				[]string{""},
+				signer,
+				certificate,
+				channelID,
+				txid,
+			)
+
+			// connect to deliver service on all peers
+			err = dg.Connect(ctx)
+			if err != nil {
+				fmt.Println("error Connect", err)
+				return
+			}
+		}
 
 		// send the envelope for ordering
 		if err = broadcastClient.Send(env); err != nil {
-			fmt.Println("error sending transaction for update function", 500)
-			// broadcastClient.Close()
+			fmt.Println("error sending transaction for update function", 500, err)
 			return
 		}
+
 		// broadcastClient.Close()
-		// if dg != nil && ctx != nil {
-		// 	// wait for event that contains the txid from all peers
-		// 	err = dg.Wait(ctx)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// }
+		if dg != nil && ctx != nil {
+			// wait for event that contains the txid from all peers
+			err = dg.Wait(ctx)
+			if err != nil {
+				fmt.Println("error Wait", 500, err)
+				return
+			}
+		}
+
 		fmt.Println("OK")
 	}
 	return
+}
+
+func NewDeliverGroup(
+	deliverClients []pb.DeliverClient,
+	peerAddresses []string,
+	signer identity.SignerSerializer,
+	certificate tls.Certificate,
+	channelID string,
+	txid string,
+) *chaincode.DeliverGroup {
+	clients := make([]*chaincode.DeliverClient, len(deliverClients))
+	for i, client := range deliverClients {
+		dc := &chaincode.DeliverClient{
+			Client:  client,
+			Address: peerAddresses[i],
+		}
+		clients[i] = dc
+	}
+
+	dg := &chaincode.DeliverGroup{
+		Clients:     clients,
+		Certificate: certificate,
+		ChannelID:   channelID,
+		TxID:        txid,
+		Signer:      signer,
+	}
+
+	return dg
 }
