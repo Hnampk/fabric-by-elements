@@ -110,3 +110,5 @@ test fabric-go-sdk
 6. Invoke chaincode (go_7)
 
 # API server: go run go ht_invoke.go
+
+Use external chaincode instead of docker container: external-chaincode.txt
