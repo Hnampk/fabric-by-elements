@@ -51,9 +51,9 @@ var responseChannel chan string
 
 const chaincodeName string = "mycc"
 
-// const rootURL string = "/home/ewallet/network/"
+const rootURL string = "/home/ewallet/network/"
 
-const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
+// const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
 
 var ctx = context.Background()
 var rdb *redis.Client
@@ -221,13 +221,13 @@ func (c *ClientWorker) exec(args [][]byte, responseChannel chan []byte, endorser
 	}
 
 	// response payload
-	responses, err := processProposals(endorserClients, signedProp)
+	responses, err := processProposals(endorserClients, *signedProp)
 	if err != nil || len(responses) < 1 {
 		// 	// responseChannel <- "Timeout" // fix me
 		fmt.Println("ERROR occured!", err)
 		return
 	}
-
+	//
 	fmt.Println("TXID:", time.Now(), txid)
 	rawProposal := RawProposal(prop)
 	proposalResponse := ProposalResponse(responses[0])
@@ -246,7 +246,7 @@ func (c *ClientWorker) exec(args [][]byte, responseChannel chan []byte, endorser
 }
 
 // processProposals sends a signed proposal to a set of peers, and gathers all the responses.
-func processProposals(endorserClients []pb.EndorserClient, signedProposal *pb.SignedProposal) ([]*pb.ProposalResponse, error) {
+func processProposals(endorserClients []pb.EndorserClient, signedProposal pb.SignedProposal) ([]*pb.ProposalResponse, error) {
 	responsesCh := make(chan *pb.ProposalResponse, len(endorserClients))
 	errorCh := make(chan error, len(endorserClients))
 	wg := sync.WaitGroup{}
@@ -254,7 +254,7 @@ func processProposals(endorserClients []pb.EndorserClient, signedProposal *pb.Si
 		wg.Add(1)
 		go func(endorser pb.EndorserClient) {
 			defer wg.Done()
-			proposalResp, err := endorser.ProcessProposal(context.Background(), signedProposal)
+			proposalResp, err := endorser.ProcessProposal(context.Background(), &signedProposal)
 			if err != nil {
 				errorCh <- err
 				return

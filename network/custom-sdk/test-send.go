@@ -53,9 +53,9 @@ var responseChannel chan string
 
 const channelID string = "vnpay-channel"
 
-// const rootURL string = "/home/ewallet/network/"
+const rootURL string = "/home/ewallet/network/"
 
-const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
+// const rootURL string = "/home/nampkh/nampkh/my-fabric/network/"
 const waitForEvent = true
 
 var ctx = context.Background()
@@ -205,10 +205,10 @@ func send(broadcastClient *common.BroadcastGRPCClient, signer *signerLib.Signer)
 				return
 			}
 
-			// waitForEventTimeout := 30 * time.Second
-			// var cancelFunc context.CancelFunc
-			// ctx, cancelFunc = context.WithTimeout(context.Background(), waitForEventTimeout)
-			// defer cancelFunc()
+			waitForEventTimeout := 30 * time.Second
+			var cancelFunc context.CancelFunc
+			ctx, cancelFunc = context.WithTimeout(context.Background(), waitForEventTimeout)
+			defer cancelFunc()
 
 			dg = NewDeliverGroup(
 				deliverClients,
