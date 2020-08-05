@@ -22,6 +22,7 @@ import (
 	pb "github.com/hyperledger/fabric-protos-go/peer"
 	signerLib "github.com/hyperledger/fabric/cmd/common/signer"
 	"github.com/hyperledger/fabric/protoutil"
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )
 
@@ -46,7 +47,7 @@ type ProposalResponse struct {
 	Error   error
 	TxID    string
 	Prop    *peer.Proposal
-	Content *pb.ProposalResponse
+	Content []*pb.ProposalResponse
 	Signer  *signerLib.Signer
 }
 
@@ -63,7 +64,6 @@ type SignedProposalWrapper struct {
 
 // hard-code for test only
 const peerAddress = "peer0.org1.example.com:7051"
-const deliverPeerAddress = "peer0.org1.example.com:7051"
 const ordererAddress = "orderer.example.com:7050"
 const peerMSPID = "Org1MSP"
 
@@ -74,9 +74,12 @@ const chaincodeName = "mycc"
 const channelID = "vnpay-channel"
 const waitForEvent = true
 
+var deliverPeerAddress = []string{"peer0.org1.example.com:7051"}
+
 var workerNum = 10
 var requestChannel = make(chan ProposalWrapper)
 var submitChannel = make(chan SignedProposalWrapper)
+var deliverClients = []pb.DeliverClient{}
 
 var signerConfig = signerLib.Config{
 	MSPID:        peerMSPID,
@@ -85,7 +88,6 @@ var signerConfig = signerLib.Config{
 }
 
 func main() {
-
 	if len(os.Args) < 2 {
 		fmt.Println("Please enter the Number of connections")
 		return
@@ -99,7 +101,12 @@ func main() {
 	}
 
 	initProposerPool(workerNum)
-	initSubmitterPool(workerNum)
+	err = initSubmitterPool(workerNum)
+
+	if err != nil {
+		fmt.Println("An error occurred while initSubmitterPool: ", err)
+		return
+	}
 
 	mux := http.NewServeMux()
 
@@ -227,7 +234,7 @@ func (p Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 
 	return &ProposalResponse{
 		Prop:    prop,
-		Content: responses[0],
+		Content: responses,
 		TxID:    txID,
 		Signer:  signer,
 	}, nil
@@ -263,7 +270,15 @@ func processProposals(endorserClients []pb.EndorserClient, signedProposal pb.Sig
 	return responses, nil
 }
 
-func initSubmitterPool(poolSize int) {
+func initSubmitterPool(poolSize int) error {
+	// connection to deliver peer will be establish very soon
+	err := createPeerDeliverClient()
+
+	if err != nil {
+		fmt.Println("[ERROR]initSubmitterPool: createPeerDeliverClient", err)
+		return err
+	}
+
 	for i := 0; i < poolSize; i++ {
 		submitter := Submitter{
 			Id: i,
@@ -278,6 +293,22 @@ func initSubmitterPool(poolSize int) {
 
 		go submitter.start()
 	}
+
+	return nil
+}
+
+func createPeerDeliverClient() error {
+	for _, deliverClientAddr := range deliverPeerAddress {
+		deliverClient, err := common.GetPeerDeliverClientFnc(deliverClientAddr, "tlsRootCertFile")
+		if err != nil {
+			fmt.Println("[ERROR]createPeerDeliverClient: GetPeerDeliverClientFnc", err)
+			return errors.Errorf("[ERROR]createPeerDeliverClient: GetPeerDeliverClientFnc", err)
+		}
+
+		deliverClients = append(deliverClients, deliverClient)
+	}
+
+	return nil
 }
 
 func (s *Submitter) connectToOrderer(tartgetOrdererAddress string) error {
@@ -344,8 +375,7 @@ func (s Submitter) start() {
 	defer s.broadcastClient.Close()
 
 	for wrapper := range s.submitChannel {
-
-		env, err := protoutil.CreateSignedTx(wrapper.proposalResponse.Prop, wrapper.proposalResponse.Signer, wrapper.proposalResponse.Content)
+		env, err := protoutil.CreateSignedTx(wrapper.proposalResponse.Prop, wrapper.proposalResponse.Signer, wrapper.proposalResponse.Content...)
 		if err != nil {
 			fmt.Println("ERROR CreateSignedTx", err)
 			wrapper.errorChannel <- err
@@ -413,52 +443,56 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 
 	// =========================== SUBMIT PHASE ===========================
 
-	if proposalResponse.Content.Response.Status >= shim.ERRORTHRESHOLD {
+	proposalResp := proposalResponse.Content[0]
+
+	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
 		http.Error(res, "shim.ERRORTHRESHOLD", http.StatusInternalServerError)
 		return
 	}
+	var dg *chaincode.DeliverGroup
+	var ctx context.Context
 
-	// create submit event listener connect to peer
 	if waitForEvent {
-		waitForEventTimeout := 5 * time.Second
+		// create submit event listener connect to peer
+		waitForEventTimeout := 50 * time.Second
 		var cancelFunc context.CancelFunc
-		ctx, cancelFunc := context.WithTimeout(context.Background(), waitForEventTimeout)
+		ctx, cancelFunc = context.WithTimeout(context.Background(), waitForEventTimeout)
 		defer cancelFunc()
 
-		dg, err := createSubmitEventListener(ctx, proposalResponse.TxID)
+		dg, err = createSubmitEventListener(ctx, proposalResponse.TxID)
 
 		if err != nil {
 			http.Error(res, err.Error(), http.StatusInternalServerError)
 			return
 		}
+	}
 
-		errChan := make(chan error)
+	errChan := make(chan error)
 
-		submitChannel <- SignedProposalWrapper{
-			proposalResponse: proposalResponse,
-			errorChannel:     errChan,
-		}
+	submitChannel <- SignedProposalWrapper{
+		proposalResponse: proposalResponse,
+		errorChannel:     errChan,
+	}
 
-		if err := <-errChan; err != nil {
-			// fmt.Fprint(res, proposalResponse.TxID)
+	if err := <-errChan; err != nil {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if dg != nil && ctx != nil {
+		// wait for event that contains the txid from all peers
+		err = dg.Wait(ctx)
+		if err != nil {
 			http.Error(res, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		if dg != nil && ctx != nil {
-			// wait for event that contains the txid from all peers
-			err = dg.Wait(ctx)
-			if err != nil {
-				http.Error(res, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		fmt.Fprint(res, proposalResponse.TxID)
+		fmt.Fprint(res, "comitted, txid: "+proposalResponse.TxID)
 		return
 	}
 
-	fmt.Fprint(res, proposalResponse.TxID)
+	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
+	return
 }
 
 func createSubmitEventListener(ctx context.Context, txID string) (*chaincode.DeliverGroup, error) {
@@ -471,14 +505,6 @@ func createSubmitEventListener(ctx context.Context, txID string) (*chaincode.Del
 
 	var dg *chaincode.DeliverGroup
 
-	deliverClients := []pb.DeliverClient{}
-
-	deliverClient, err := common.GetPeerDeliverClientFnc(deliverPeerAddress, "tlsRootCertFile")
-	if err != nil {
-		fmt.Println("error getting deliver client for", err)
-		return nil, err
-	}
-	deliverClients = append(deliverClients, deliverClient)
 	certificate, err := common.GetCertificateFnc()
 	// connect to deliver service on all peers
 	if err != nil {
@@ -488,7 +514,7 @@ func createSubmitEventListener(ctx context.Context, txID string) (*chaincode.Del
 
 	dg = NewDeliverGroup(
 		deliverClients,
-		[]string{""},
+		[]string{peerAddress},
 		signer,
 		certificate,
 		channelID,
