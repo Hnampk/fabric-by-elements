@@ -16,6 +16,7 @@ import (
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/identity"
+	redis "github.com/go-redis/redis/v8"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pcommon "github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/peer"
@@ -24,6 +25,8 @@ import (
 	"github.com/hyperledger/fabric/protoutil"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+
+	cmap "github.com/orcaman/concurrent-map"
 )
 
 type Proposer struct {
@@ -62,17 +65,33 @@ type SignedProposalWrapper struct {
 	errorChannel     chan error
 }
 
+type SubmissionListener struct {
+	Id  int
+	Dg  *chaincode.DeliverGroup
+	ctx context.Context
+}
+
+type TransactionWithStatus struct {
+	TxID            string
+	IsSubmitted     bool
+	ResponseChannel chan bool
+}
+
 // hard-code for test only
 const peerAddress = "peer0.org1.example.com:7051"
 const ordererAddress = "orderer.example.com:7050"
 const peerMSPID = "Org1MSP"
 
 // const rootURL = "/home/nampkh/nampkh/my-fabric/network/"
-const rootURL = "/home/ewallet/network/"
+
+var rootURL = "/home/ewallet/network/"
+var signerConfig signerLib.Config
+
 const chaincodeLang = "GOLANG"
 const chaincodeName = "mycc"
 const channelID = "vnpay-channel"
-const waitForEvent = true
+
+var waitForEvent = false
 
 var deliverPeerAddress = []string{"peer0.org1.example.com:7051"}
 
@@ -81,17 +100,37 @@ var requestChannel = make(chan ProposalWrapper)
 var submitChannel = make(chan SignedProposalWrapper)
 var deliverClients = []pb.DeliverClient{}
 
-var signerConfig = signerLib.Config{
-	MSPID:        peerMSPID,
-	IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
-	KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
-}
+var rdb *redis.Client
+var redisCtx = context.Background()
+
+var responseChannelMap = cmap.New()
 
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Please enter the Number of connections")
 		return
 	}
+
+	if len(os.Args) >= 3 {
+		rootURL = "/home/nampkh/nampkh/my-fabric/network/"
+	}
+
+	signerConfig = signerLib.Config{
+		MSPID:        peerMSPID,
+		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
+		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
+	}
+
+	// if len(os.Args) == 3 {
+	// 	waitForEvent = true
+	// }
+
+	// redis setup
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 
 	var err error
 	workerNum, err = strconv.Atoi(os.Args[1])
@@ -102,6 +141,7 @@ func main() {
 
 	initProposerPool(workerNum)
 	err = initSubmitterPool(workerNum)
+	initListenerPool(1)
 
 	if err != nil {
 		fmt.Println("An error occurred while initSubmitterPool: ", err)
@@ -116,6 +156,15 @@ func main() {
 	port := "8090"
 	fmt.Println("Server listen on port", port)
 	http.ListenAndServe(":"+port, mux)
+
+	// s := &http.Server{
+	// 	Addr:           ":" + port,
+	// 	Handler:        mux,
+	// 	ReadTimeout:    50 * time.Second,
+	// 	WriteTimeout:   50 * time.Second,
+	// 	MaxHeaderBytes: 1 << 10,
+	// }
+	// s.ListenAndServe()
 }
 
 func initProposerPool(poolSize int) {
@@ -375,32 +424,34 @@ func (s Submitter) start() {
 	defer s.broadcastClient.Close()
 
 	for wrapper := range s.submitChannel {
-		env, err := protoutil.CreateSignedTx(wrapper.proposalResponse.Prop, wrapper.proposalResponse.Signer, wrapper.proposalResponse.Content...)
-		if err != nil {
-			fmt.Println("ERROR CreateSignedTx", err)
-			wrapper.errorChannel <- err
-			continue
-		}
-
-		err = s.submit(env)
-		if err != nil {
-			// retry to connect to orderer 1 time! (the connection may be be disrupted)
-			err = s.connectToOrderer(ordererAddress)
+		func(wrapper SignedProposalWrapper) {
+			defer close(wrapper.errorChannel)
+			env, err := protoutil.CreateSignedTx(wrapper.proposalResponse.Prop, wrapper.proposalResponse.Signer, wrapper.proposalResponse.Content...)
 			if err != nil {
+				fmt.Println("ERROR CreateSignedTx", err)
 				wrapper.errorChannel <- err
-				continue
+				return
 			}
 
 			err = s.submit(env)
-			// if still got error after retry => orderer problem
 			if err != nil {
-				wrapper.errorChannel <- err
-				continue
-			}
-		}
+				// retry to connect to orderer 1 time! (the connection may be be disrupted)
+				err = s.connectToOrderer(ordererAddress)
+				if err != nil {
+					wrapper.errorChannel <- err
+					return
+				}
 
-		// wrapper.errorChannel <- errors.Errorf("DONE")
-		close(wrapper.errorChannel)
+				err = s.submit(env)
+				// if still got error after retry => orderer problem
+				if err != nil {
+					wrapper.errorChannel <- err
+					return
+				}
+			}
+
+			// wrapper.errorChannel <- errors.Errorf("DONE")
+		}(wrapper)
 		// free the Submitter after submit tx to orderer
 	}
 }
@@ -412,6 +463,123 @@ func (s Submitter) submit(env *pcommon.Envelope) error {
 		return err
 	}
 	return nil
+}
+
+func initListenerPool(poolSize int) {
+	for i := 0; i < poolSize; i++ {
+		listener, err := initSubmissionListener(i)
+
+		if err != nil {
+
+		}
+
+		go listener.start()
+	}
+}
+
+func initSubmissionListener(id int) (*SubmissionListener, error) {
+	ctx := context.Background()
+
+	dg, err := createDeliverGroup(ctx, "")
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &SubmissionListener{
+		Id:  id,
+		Dg:  dg,
+		ctx: ctx,
+	}, nil
+}
+
+func createDeliverGroup(ctx context.Context, txID string) (*chaincode.DeliverGroup, error) {
+	signer, err := signerLib.NewSigner(signerConfig)
+
+	deliverClients := []pb.DeliverClient{}
+	deliverClient, err := common.GetPeerDeliverClientFnc(deliverPeerAddress[0], "tlsRootCertFile")
+	if err != nil {
+		fmt.Println("[ERROR]createPeerDeliverClient: GetPeerDeliverClientFnc", err)
+		return nil, errors.Errorf("[ERROR]createPeerDeliverClient: GetPeerDeliverClientFnc", err)
+	}
+
+	deliverClients = append(deliverClients, deliverClient)
+
+	if err != nil {
+		fmt.Println("[ERROR]propose: NewSigner:", err)
+		return nil, err
+	}
+
+	var dg *chaincode.DeliverGroup
+
+	certificate, err := common.GetCertificateFnc()
+	// connect to deliver service on all peers
+	if err != nil {
+		fmt.Println("error GetCertificateFnc", err)
+		return nil, err
+	}
+
+	dg = NewDeliverGroup(
+		deliverClients,
+		[]string{peerAddress},
+		signer,
+		certificate,
+		channelID,
+		txID,
+	)
+
+	// connect to deliver service on all peers
+	err = dg.Connect(ctx)
+	if err != nil {
+		fmt.Println("error Connect", err)
+		return nil, err
+	}
+
+	return dg, nil
+}
+
+func (l SubmissionListener) start() error {
+	if l.Dg != nil && l.ctx != nil {
+		// wait for event that contains the txid from all peers
+		submissionChannel := make(chan string)
+
+		// Fix me: did not handle exception
+		go l.Dg.Listen(l.ctx, submissionChannel)
+		// if err != nil {
+		// 	fmt.Println("Listen", err.Error())
+		// 	return err
+		// }
+
+		for msg := range submissionChannel {
+
+			// Fix me: what happened when we received an error?
+			onReceiveSubmissionEvent(msg)
+		}
+
+	}
+	return nil
+}
+
+func onReceiveSubmissionEvent(txID string) {
+	redisData, err := rdb.Get(redisCtx, txID).Result()
+	if err != nil {
+		if err == redis.Nil {
+			fmt.Println("[ERROR] txID not exists!")
+			return
+		}
+		fmt.Println("[ERROR]onReceiveSubmissionEvent: rdb.Get: ", err.Error())
+		return
+	}
+
+	if redisData == "0" {
+		if tmp, ok := responseChannelMap.Get(txID); ok {
+			responseChannel := tmp.(chan bool)
+			responseChannel <- true
+		}
+
+		rdb.Set(redisCtx, txID, true, 0)
+	}
+
 }
 
 func invokeHandler(res http.ResponseWriter, req *http.Request) {
@@ -449,23 +617,12 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "shim.ERRORTHRESHOLD", http.StatusInternalServerError)
 		return
 	}
-	var dg *chaincode.DeliverGroup
-	var ctx context.Context
 
-	if waitForEvent {
-		// create submit event listener connect to peer
-		waitForEventTimeout := 50 * time.Second
-		var cancelFunc context.CancelFunc
-		ctx, cancelFunc = context.WithTimeout(context.Background(), waitForEventTimeout)
-		defer cancelFunc()
+	responseChannel := make(chan bool)
 
-		dg, err = createSubmitEventListener(ctx, proposalResponse.TxID)
+	responseChannelMap.Set(proposalResponse.TxID, responseChannel)
 
-		if err != nil {
-			http.Error(res, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
+	rdb.Set(redisCtx, proposalResponse.TxID, false, 0)
 
 	errChan := make(chan error)
 
@@ -479,18 +636,7 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if dg != nil && ctx != nil {
-		// wait for event that contains the txid from all peers
-		err = dg.Wait(ctx)
-		if err != nil {
-			http.Error(res, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		fmt.Fprint(res, "comitted, txid: "+proposalResponse.TxID)
-		return
-	}
-
+	<-responseChannel
 	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
 	return
 }
