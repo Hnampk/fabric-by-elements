@@ -825,6 +825,77 @@ func (dg *DeliverGroup) ClientWait(dc *DeliverClient) {
 	}
 }
 
+// Listen clones Wait method
+// Listen waits for all deliver client connections in the group to
+// either receive a block with the txid, an error, or for the
+// context to timeout
+func (dg *DeliverGroup) Listen(ctx context.Context, txIdChannel chan string) error {
+	if len(dg.Clients) == 0 {
+		return nil
+	}
+	dg.wg.Add(len(dg.Clients))
+	errChan := make(chan string)
+	for _, client := range dg.Clients {
+		go dg.ClientListen(client, txIdChannel, errChan)
+	}
+	readyCh := make(chan struct{})
+	go dg.WaitForWG(readyCh)
+
+	select {
+	case <-readyCh:
+		if dg.Error != nil {
+			return dg.Error
+		}
+	case <-ctx.Done():
+		err := errors.New("timed out waiting for txid on all peers")
+		return err
+	case <-errChan:
+		err := errors.New("timed out waiting for txid on all peers")
+		return err
+	}
+
+	return nil
+}
+
+// ClientListen clones ClientWait method
+// ClientListen waits for the specified deliver client to receive
+// a block event, and dont care about the txid
+func (dg *DeliverGroup) ClientListen(dc *DeliverClient, txIdChannel chan string, errChan chan string) {
+	defer dg.wg.Done()
+	for {
+		resp, err := dc.Connection.Recv()
+		if err != nil {
+			err = errors.WithMessagef(err, "error receiving from deliver filtered at %s", dc.Address)
+			fmt.Println(err)
+			dg.setError(err)
+			errChan <- err.Error()
+			return
+		}
+		switch r := resp.Type.(type) {
+		case *pb.DeliverResponse_FilteredBlock:
+			filteredTransactions := r.FilteredBlock.FilteredTransactions
+			for _, tx := range filteredTransactions {
+				if tx.TxValidationCode != pb.TxValidationCode_VALID {
+					err = errors.Errorf("transaction invalidated with status (%s)", tx.TxValidationCode)
+					dg.setError(err)
+					txIdChannel <- "Error"
+				}
+				txIdChannel <- tx.Txid
+			}
+		case *pb.DeliverResponse_Status:
+			err = errors.Errorf("deliver completed with status (%s) before txid received", r.Status)
+			fmt.Println(err)
+			dg.setError(err)
+			continue
+		default:
+			err = errors.Errorf("received unexpected response type (%T) from %s", r, dc.Address)
+			fmt.Println(err)
+			dg.setError(err)
+			continue
+		}
+	}
+}
+
 // WaitForWG waits for the deliverGroup's wait group and closes
 // the channel when ready
 func (dg *DeliverGroup) WaitForWG(readyCh chan struct{}) {
