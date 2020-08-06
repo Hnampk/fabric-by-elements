@@ -16,7 +16,6 @@ import (
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/identity"
-	redis "github.com/go-redis/redis/v8"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pcommon "github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/peer"
@@ -100,9 +99,6 @@ var requestChannel = make(chan ProposalWrapper)
 var submitChannel = make(chan SignedProposalWrapper)
 var deliverClients = []pb.DeliverClient{}
 
-var rdb *redis.Client
-var redisCtx = context.Background()
-
 var responseChannelMap = cmap.New()
 
 func main() {
@@ -120,17 +116,6 @@ func main() {
 		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
 		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
 	}
-
-	// if len(os.Args) == 3 {
-	// 	waitForEvent = true
-	// }
-
-	// redis setup
-	rdb = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
 
 	var err error
 	workerNum, err = strconv.Atoi(os.Args[1])
@@ -156,15 +141,6 @@ func main() {
 	port := "8090"
 	fmt.Println("Server listen on port", port)
 	http.ListenAndServe(":"+port, mux)
-
-	// s := &http.Server{
-	// 	Addr:           ":" + port,
-	// 	Handler:        mux,
-	// 	ReadTimeout:    50 * time.Second,
-	// 	WriteTimeout:   50 * time.Second,
-	// 	MaxHeaderBytes: 1 << 10,
-	// }
-	// s.ListenAndServe()
 }
 
 func initProposerPool(poolSize int) {
@@ -561,23 +537,11 @@ func (l SubmissionListener) start() error {
 }
 
 func onReceiveSubmissionEvent(txID string) {
-	redisData, err := rdb.Get(redisCtx, txID).Result()
-	if err != nil {
-		if err == redis.Nil {
-			fmt.Println("[ERROR] txID not exists!")
-			return
-		}
-		fmt.Println("[ERROR]onReceiveSubmissionEvent: rdb.Get: ", err.Error())
+	if tmp, ok := responseChannelMap.Get(txID); ok {
+		responseChannel := tmp.(chan bool)
+		responseChannel <- true
+
 		return
-	}
-
-	if redisData == "0" {
-		if tmp, ok := responseChannelMap.Get(txID); ok {
-			responseChannel := tmp.(chan bool)
-			responseChannel <- true
-		}
-
-		rdb.Set(redisCtx, txID, true, 0)
 	}
 
 }
@@ -619,10 +583,7 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	}
 
 	responseChannel := make(chan bool)
-
 	responseChannelMap.Set(proposalResponse.TxID, responseChannel)
-
-	rdb.Set(redisCtx, proposalResponse.TxID, false, 0)
 
 	errChan := make(chan error)
 
@@ -637,6 +598,8 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	}
 
 	<-responseChannel
+	responseChannelMap.Remove(proposalResponse.TxID)
+
 	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
 	return
 }
