@@ -16,7 +16,6 @@ import (
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/identity"
-	"example.com/custom-sdk/nonce"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pcommon "github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/peer"
@@ -132,8 +131,7 @@ var deliverClients = []pb.DeliverClient{}
 */
 var responseChannelMap = cmap.New()
 
-// var nonce Nonce
-var noneManager nonce.NonceManager
+var nonce Nonce
 
 func main() {
 	if len(os.Args) < 2 {
@@ -162,14 +160,13 @@ func main() {
 	err = initSubmitterPool(workerNum)
 	initListenerPool(1)
 
-	noneManager.Init()
+	nonce = Nonce{value: make(map[string]int)}
 
 	if err != nil {
 		fmt.Println("An error occurred while initSubmitterPool: ", err)
 		return
 	}
 
-	// HTTP server
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/invoke", invokeHandler)
@@ -597,40 +594,12 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	json.Unmarshal(body, &proposeRequest)
 	accountId := proposeRequest.Args[0]
 
-	// Nampkh: the below logic does not handle the order of incoming request
-	//	It just make sure that only 01 (request of an account) will be executed at a time
-	var increasedNonce int
-
-	increasedNonce, err = tryToGetNonce(accountId)
-
-	if err != nil {
-		http.Error(res, "[ERROR] invokeHandler: "+err.Error(), http.StatusInternalServerError)
-		return
+	if !concurrency {
+		nonce.Lock()
 	}
 
-	if increasedNonce < 0 {
-		// busy service
-		pubsub := noneManager.SubscribeChannel(accountId)
-		pubsubChan := pubsub.Channel()
-
-		for _ = range pubsubChan {
-			// msg maybe error
-			increasedNonce, err = tryToGetNonce(accountId)
-			// fmt.Println(msg.Payload, "mynonce:", increasedNonce)
-
-			if err != nil {
-				http.Error(res, "[ERROR] invokeHandler: "+err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			if increasedNonce > -1 {
-				break
-			}
-			// still busy
-		}
-	}
-
-	proposeRequest.Nonce = increasedNonce
+	currentNonceInt := nonce.Inc(accountId)
+	proposeRequest.Nonce = currentNonceInt
 
 	responseChan := make(chan ProposalResponse)
 	fmt.Println(proposeRequest)
@@ -645,15 +614,14 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	requestChannel <- proposalWrapper
 	proposalResponse = <-responseChan
 
-	err = noneManager.IncreaseLatestNonce(accountId)
-
-	if err != nil {
-		http.Error(res, err.Error(), http.StatusInternalServerError)
-	}
-
 	if proposalResponse.Error != nil {
+		// nonce.Unlock()
 		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if !concurrency {
+		nonce.Unlock()
 	}
 
 	//
@@ -686,32 +654,6 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 
 	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
 	return
-}
-
-func tryToGetNonce(accountId string) (int, error) {
-
-	currentNonceInt, err := noneManager.GetLatestNonce(accountId)
-
-	if err != nil {
-		if !noneManager.IsNilValue(err) {
-			return -1, err
-		}
-
-		currentNonceInt = -1
-	}
-
-	increasedNonce := currentNonceInt + 1
-	isMyTurn, err := noneManager.SetNX(accountId + "-" + strconv.Itoa(increasedNonce))
-
-	if err != nil {
-		return -1, err
-	}
-
-	if !isMyTurn {
-		return -1, nil
-	}
-
-	return increasedNonce, nil
 }
 
 func NewDeliverGroup(
