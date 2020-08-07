@@ -16,6 +16,7 @@ import (
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/identity"
+	"example.com/custom-sdk/nonce"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pcommon "github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/peer"
@@ -43,6 +44,7 @@ type ProposalWrapper struct {
 type ProposeRequest struct {
 	FuncName string
 	Args     []string
+	Nonce    int
 }
 
 type ProposalResponse struct {
@@ -76,6 +78,32 @@ type TransactionWithStatus struct {
 	ResponseChannel chan bool
 }
 
+var concurrency = false
+
+type Nonce struct {
+	value map[string]int
+	mux   sync.Mutex
+}
+
+func (n *Nonce) Lock() {
+	n.mux.Lock()
+}
+
+func (n *Nonce) Unlock() {
+	n.mux.Unlock()
+}
+
+// Inc increments the counter for the given key.
+func (n *Nonce) Inc(key string) int {
+	if concurrency {
+		n.mux.Lock()
+		defer n.mux.Unlock()
+	}
+	n.value[key]++
+	// Lock so only one goroutine at a time can access the map c.v.
+	return n.value[key]
+}
+
 // hard-code for test only
 const peerAddress = "peer0.org1.example.com:7051"
 const ordererAddress = "orderer.example.com:7050"
@@ -99,7 +127,13 @@ var requestChannel = make(chan ProposalWrapper)
 var submitChannel = make(chan SignedProposalWrapper)
 var deliverClients = []pb.DeliverClient{}
 
+/*
+	mapping txid and a channel - which let the invokeHandler know that the transaction is submitted
+*/
 var responseChannelMap = cmap.New()
+
+// var nonce Nonce
+var noneManager nonce.NonceManager
 
 func main() {
 	if len(os.Args) < 2 {
@@ -128,11 +162,14 @@ func main() {
 	err = initSubmitterPool(workerNum)
 	initListenerPool(1)
 
+	noneManager.Init()
+
 	if err != nil {
 		fmt.Println("An error occurred while initSubmitterPool: ", err)
 		return
 	}
 
+	// HTTP server
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/invoke", invokeHandler)
@@ -186,6 +223,7 @@ func (p Proposer) start() {
 	defer p.closeConnection()
 
 	for wrapper := range p.requestChannel {
+		// when receive a proposal, forward it to peer (propose)
 		var args [][]byte
 		fcn := wrapper.Request.FuncName
 		args = [][]byte{[]byte(fcn)}
@@ -543,7 +581,6 @@ func onReceiveSubmissionEvent(txID string) {
 
 		return
 	}
-
 }
 
 func invokeHandler(res http.ResponseWriter, req *http.Request) {
@@ -558,21 +595,68 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 
 	var proposeRequest ProposeRequest
 	json.Unmarshal(body, &proposeRequest)
-	responseChan := make(chan ProposalResponse)
+	accountId := proposeRequest.Args[0]
 
+	// Nampkh: the below logic does not handle the order of incoming request
+	//	It just make sure that only 01 (request of an account) will be executed at a time
+	var increasedNonce int
+
+	increasedNonce, err = tryToGetNonce(accountId)
+
+	if err != nil {
+		http.Error(res, "[ERROR] invokeHandler: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if increasedNonce < 0 {
+		// busy service
+		pubsub := noneManager.SubscribeChannel(accountId)
+		pubsubChan := pubsub.Channel()
+
+		for _ = range pubsubChan {
+			// msg maybe error
+			increasedNonce, err = tryToGetNonce(accountId)
+			// fmt.Println(msg.Payload, "mynonce:", increasedNonce)
+
+			if err != nil {
+				http.Error(res, "[ERROR] invokeHandler: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			if increasedNonce > -1 {
+				break
+			}
+			// still busy
+		}
+	}
+
+	proposeRequest.Nonce = increasedNonce
+
+	responseChan := make(chan ProposalResponse)
+	fmt.Println(proposeRequest)
 	proposalWrapper := ProposalWrapper{
 		Request:                 proposeRequest,
 		proposalResponseChannel: responseChan,
 	}
 
+	var proposalResponse ProposalResponse
+
+	// send proposal to proposer
 	requestChannel <- proposalWrapper
-	proposalResponse := <-responseChan
+	proposalResponse = <-responseChan
+
+	err = noneManager.IncreaseLatestNonce(accountId)
+
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+	}
 
 	if proposalResponse.Error != nil {
 		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	//
 	// =========================== SUBMIT PHASE ===========================
 
 	proposalResp := proposalResponse.Content[0]
@@ -604,40 +688,30 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	return
 }
 
-func createSubmitEventListener(ctx context.Context, txID string) (*chaincode.DeliverGroup, error) {
-	signer, err := signerLib.NewSigner(signerConfig)
+func tryToGetNonce(accountId string) (int, error) {
+
+	currentNonceInt, err := noneManager.GetLatestNonce(accountId)
 
 	if err != nil {
-		fmt.Println("[ERROR]propose: NewSigner:", err)
-		return nil, err
+		if !noneManager.IsNilValue(err) {
+			return -1, err
+		}
+
+		currentNonceInt = -1
 	}
 
-	var dg *chaincode.DeliverGroup
+	increasedNonce := currentNonceInt + 1
+	isMyTurn, err := noneManager.SetNX(accountId + "-" + strconv.Itoa(increasedNonce))
 
-	certificate, err := common.GetCertificateFnc()
-	// connect to deliver service on all peers
 	if err != nil {
-		fmt.Println("error GetCertificateFnc", err)
-		return nil, err
+		return -1, err
 	}
 
-	dg = NewDeliverGroup(
-		deliverClients,
-		[]string{peerAddress},
-		signer,
-		certificate,
-		channelID,
-		txID,
-	)
-
-	// connect to deliver service on all peers
-	err = dg.Connect(ctx)
-	if err != nil {
-		fmt.Println("error Connect", err)
-		return nil, err
+	if !isMyTurn {
+		return -1, nil
 	}
 
-	return dg, nil
+	return increasedNonce, nil
 }
 
 func NewDeliverGroup(
