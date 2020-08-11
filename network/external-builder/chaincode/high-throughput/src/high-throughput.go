@@ -29,13 +29,55 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pb "github.com/hyperledger/fabric-protos-go/peer"
+	"github.com/pkg/errors"
+	// "google.golang.org/protobuf/internal/errors"
 )
 
 //SmartContract is the data structure which represents this contract and on which  various contract lifecycle functions are attached
 type SmartContract struct {
+}
+
+type InternalWorldState struct {
+	value map[string]float64
+	mux   sync.Mutex
+}
+
+func (w *InternalWorldState) Lock() {
+	w.mux.Lock()
+}
+
+func (w *InternalWorldState) Unlock() {
+	w.mux.Unlock()
+}
+
+func (w *InternalWorldState) Deposit(key string, value float64) error {
+	w.value[key] += value
+
+	return nil
+}
+
+func (w *InternalWorldState) WithDraw(key string, value float64) error {
+	w.value[key] -= value
+
+	return nil
+}
+
+func (w *InternalWorldState) GetAccountBalance(key string) (float64, error) {
+	if balance, ok := w.value[key]; ok {
+		return balance, nil
+	}
+
+	return -1, errors.Errorf("account not exist internally")
+}
+
+func (w *InternalWorldState) updateAccountBalance(key string, value float64) error {
+	w.value[key] = value
+
+	return nil
 }
 
 // Define Status codes for the response
@@ -99,9 +141,9 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 	}
 
 	// Extract the args
-	name := args[0]
+	account := args[0]
 	op := args[2]
-	_, err := strconv.ParseFloat(args[1], 64)
+	valueFloat, err := strconv.ParseFloat(args[1], 64)
 	if err != nil {
 		return shim.Error("Provided value was not a number")
 	}
@@ -111,29 +153,116 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 		return shim.Error(fmt.Sprintf("Operator %s is unrecognized", op))
 	}
 
+	// ===== START VALIDATION =====
+
+	internalWorldState.Lock()
+	defer internalWorldState.Unlock()
+
+	balance, err := internalWorldState.GetAccountBalance(account)
+
+	if err != nil {
+		fmt.Println("[ERROR] missing internal World state")
+		//
+		var getResponse pb.Response
+		getResponse = s.get(APIstub, []string{account})
+
+		if getResponse.Status >= shim.ERRORTHRESHOLD {
+			fmt.Println("getResponse ERROR")
+			// new account
+			balance = 0
+		} else {
+			balance, err = strconv.ParseFloat(string(getResponse.Payload), 64)
+			internalWorldState.updateAccountBalance(account, balance)
+
+			if err != nil {
+				return shim.Error(fmt.Sprintf("getResponse.Payload is not float number??? %s", err.Error()))
+			}
+		}
+	}
+
+	fmt.Println("balance", balance)
+
+	if op == "-" {
+		if balance-valueFloat < 0 {
+			return shim.Error(fmt.Sprintf("Invalid account balance %f", balance))
+		}
+	}
+
+	// ===== END VALIDATION =====
+
 	// Retrieve info needed for the update procedure
 	txid := APIstub.GetTxID()
-	compositeIndexName := "varName~op~value~txID"
+	compositeIndexKey := "account~op~value~txID"
 
 	// Create the composite key that will allow us to query for all deltas on a particular variable
-	compositeKey, compositeErr := APIstub.CreateCompositeKey(compositeIndexName, []string{name, op, args[1], txid})
+	compositeKey, compositeErr := APIstub.CreateCompositeKey(compositeIndexKey, []string{account, op, args[1], txid})
 	if compositeErr != nil {
-		return shim.Error(fmt.Sprintf("Could not create a composite key for %s: %s", name, compositeErr.Error()))
+		return shim.Error(fmt.Sprintf("Could not create a composite key for %s: %s", account, compositeErr.Error()))
 	}
 
 	// Save the composite key index
 	compositePutErr := APIstub.PutState(compositeKey, []byte{0x00})
 	if compositePutErr != nil {
-		return shim.Error(fmt.Sprintf("Could not put operation for %s in the ledger: %s", name, compositePutErr.Error()))
+		return shim.Error(fmt.Sprintf("Could not put operation for %s in the ledger: %s", account, compositePutErr.Error()))
 	}
 
-	eventErr := APIstub.SetEvent("updateEvent", []byte("event-hello"))
-	if eventErr != nil {
-		return shim.Error(fmt.Sprintf("Failed to emit event"))
+	newBalance := balance
+	switch {
+	case op == "+":
+		internalWorldState.Deposit(account, valueFloat)
+		newBalance += valueFloat
+	case op == "-":
+		internalWorldState.WithDraw(account, valueFloat)
+		newBalance -= valueFloat
 	}
 
-	return shim.Success([]byte(fmt.Sprintf("Successfully added %s%s to %s", op, args[1], name)))
+	// eventErr := APIstub.SetEvent("updateEvent", []byte("event-hello"))
+	// if eventErr != nil {
+	// 	return shim.Error(fmt.Sprintf("Failed to emit event"))
+	// }
+
+	return shim.Success([]byte(fmt.Sprintf("Successfully added %s%s to %s, new balance: %f", op, args[1], account, newBalance)))
 }
+
+// func validateAccountBalance(account string, value float64) bool {
+
+// }
+
+/**
+ * transfer
+ * The arguments
+ * to give in the args array are as follows:
+ *	- args[0] -> source account
+ *	- args[1] -> destination account
+ *	- args[2] -> value
+ *
+ * @param APIstub The chaincode shim
+ * @param args The arguments array for the update invocation
+ *
+ * @return A response structure indicating success or failure with a message
+ */
+// func (s *SmartContract) transfer(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
+// 	// Check we have a valid number of args
+// 	if len(args) != 3 {
+// 		return shim.Error("Incorrect number of arguments, expecting 3")
+// 	}
+
+// 	// Extract the args
+// 	source := args[0]
+// 	dest := args[2]
+// 	valueFloat, err := strconv.ParseFloat(args[1], 64)
+// 	if err != nil {
+// 		return shim.Error("Provided value was not a number")
+// 	}
+
+// 	// ===== START VALIDATION =====
+
+// 	// validate source account's balance
+
+// 	// ===== END VALIDATION =====
+
+// 	return shim.Success([]byte(fmt.Sprintf("Successfully added %s%s to %s, new balance: %f")))
+// }
 
 /**
  * Retrieves the aggregate value of a variable in the ledger. Gets all delta rows for the variable
@@ -152,17 +281,17 @@ func (s *SmartContract) get(APIstub shim.ChaincodeStubInterface, args []string) 
 		return shim.Error("Incorrect number of arguments, expecting 1")
 	}
 
-	name := args[0]
+	account := args[0]
 	// Get all deltas for the variable
-	deltaResultsIterator, deltaErr := APIstub.GetStateByPartialCompositeKey("varName~op~value~txID", []string{name})
+	deltaResultsIterator, deltaErr := APIstub.GetStateByPartialCompositeKey("account~op~value~txID", []string{account})
 	if deltaErr != nil {
-		return shim.Error(fmt.Sprintf("Could not retrieve value for %s: %s", name, deltaErr.Error()))
+		return shim.Error(fmt.Sprintf("Could not retrieve value for %s: %s", account, deltaErr.Error()))
 	}
 	defer deltaResultsIterator.Close()
 
 	// Check the variable existed
 	if !deltaResultsIterator.HasNext() {
-		return shim.Error(fmt.Sprintf("No variable by the name %s exists", name))
+		return shim.Error(fmt.Sprintf("No variable by the account %s exists", account))
 	}
 
 	// Iterate through result set and compute final value
@@ -222,18 +351,18 @@ func (s *SmartContract) prune(APIstub shim.ChaincodeStubInterface, args []string
 	}
 
 	// Retrieve the name of the variable to prune
-	name := args[0]
+	account := args[0]
 
 	// Get all delta rows for the variable
-	deltaResultsIterator, deltaErr := APIstub.GetStateByPartialCompositeKey("varName~op~value~txID", []string{name})
+	deltaResultsIterator, deltaErr := APIstub.GetStateByPartialCompositeKey("account~op~value~txID", []string{account})
 	if deltaErr != nil {
-		return shim.Error(fmt.Sprintf("Could not retrieve value for %s: %s", name, deltaErr.Error()))
+		return shim.Error(fmt.Sprintf("Could not retrieve value for %s: %s", account, deltaErr.Error()))
 	}
 	defer deltaResultsIterator.Close()
 
 	// Check the variable existed
 	if !deltaResultsIterator.HasNext() {
-		return shim.Error(fmt.Sprintf("No variable by the name %s exists", name))
+		return shim.Error(fmt.Sprintf("No variable by the account %s exists", account))
 	}
 
 	// Iterate through result set computing final value while iterating and deleting each key
@@ -280,7 +409,7 @@ func (s *SmartContract) prune(APIstub shim.ChaincodeStubInterface, args []string
 	}
 
 	// Update the ledger with the final value
-	updateResp := s.update(APIstub, []string{name, strconv.FormatFloat(finalVal, 'f', -1, 64), "+"})
+	updateResp := s.update(APIstub, []string{account, strconv.FormatFloat(finalVal, 'f', -1, 64), "+"})
 	if updateResp.Status == ERROR {
 		return shim.Error(fmt.Sprintf("Could not update the final value of the variable after pruning: %s", updateResp.Message))
 	}
@@ -305,18 +434,18 @@ func (s *SmartContract) delete(APIstub shim.ChaincodeStubInterface, args []strin
 	}
 
 	// Retrieve the variable name
-	name := args[0]
+	account := args[0]
 
 	// Delete all delta rows
-	deltaResultsIterator, deltaErr := APIstub.GetStateByPartialCompositeKey("varName~op~value~txID", []string{name})
+	deltaResultsIterator, deltaErr := APIstub.GetStateByPartialCompositeKey("account~op~value~txID", []string{account})
 	if deltaErr != nil {
-		return shim.Error(fmt.Sprintf("Could not retrieve delta rows for %s: %s", name, deltaErr.Error()))
+		return shim.Error(fmt.Sprintf("Could not retrieve delta rows for %s: %s", account, deltaErr.Error()))
 	}
 	defer deltaResultsIterator.Close()
 
 	// Ensure the variable exists
 	if !deltaResultsIterator.HasNext() {
-		return shim.Error(fmt.Sprintf("No variable by the name %s exists", name))
+		return shim.Error(fmt.Sprintf("No variable by the account %s exists", account))
 	}
 
 	// Iterate through result set and delete all indices
@@ -333,7 +462,7 @@ func (s *SmartContract) delete(APIstub shim.ChaincodeStubInterface, args []strin
 		}
 	}
 
-	return shim.Success([]byte(fmt.Sprintf("Deleted %s, %d rows removed", name, i)))
+	return shim.Success([]byte(fmt.Sprintf("Deleted %s, %d rows removed", account, i)))
 }
 
 /**
@@ -349,10 +478,13 @@ func f2barr(f float64) []byte {
 	return []byte(str)
 }
 
+var internalWorldState InternalWorldState
+
 // The main function is only relevant in unit test mode. Only included here for completeness.
 func main() {
+	internalWorldState = InternalWorldState{value: make(map[string]float64)}
 
-	// Create a new Smart Contract
+	// // Create a new Smart Contract
 	// err := shim.Start(new(SmartContract))
 	// if err != nil {
 	// 	fmt.Printf("Error creating new Smart Contract: %s", err)

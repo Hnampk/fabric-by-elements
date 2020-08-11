@@ -539,20 +539,7 @@ chaincode:
     # List of directories to treat as external builders and launchers for
     # chaincode. The external builder detection processing will iterate over the
     # builders in the order specified below.
-    externalBuilders: 
-        - name: external-builder
-          path: /home/nampkh/nampkh/my-fabric/network/external-builder
-          environmentWhitelist:
-            - GOPROXY
-            - GONOPROXY
-            - GOSUMDB
-            - GONOSUMDB
-            - GOCACHE
-            - GOPATH
-            - GOROOT
-            - HOME
-            - XDG_CACHE_HOME
-    
+    externalBuilders: []
         # - path: /path/to/directory
         #   name: descriptive-builder-name
         #   environmentWhitelist:
@@ -581,7 +568,7 @@ chaincode:
     # In dev mode, user runs the chaincode after starting peer from
     # command line on local machine.
     # In net mode, peer will run chaincode in a docker container.
-    mode: dev
+    mode: net
 
     # keepalive in seconds. In situations where the communication goes through a
     # proxy that does not support keep-alive, this parameter will maintain connection
