@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -15,10 +14,10 @@ import (
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/chaincode"
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
-	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/identity"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pcommon "github.com/hyperledger/fabric-protos-go/common"
-	"github.com/hyperledger/fabric-protos-go/peer"
+
+	// "github.com/hyperledger/fabric-protos-go/peer"
 	pb "github.com/hyperledger/fabric-protos-go/peer"
 	signerLib "github.com/hyperledger/fabric/cmd/common/signer"
 	"github.com/hyperledger/fabric/protoutil"
@@ -49,7 +48,7 @@ type ProposeRequest struct {
 type ProposalResponse struct {
 	Error   error
 	TxID    string
-	Prop    *peer.Proposal
+	Prop    *pb.Proposal
 	Content []*pb.ProposalResponse
 	Signer  *signerLib.Signer
 }
@@ -228,11 +227,11 @@ func initProposer(id int, tartgetPeerAddress string) (*Proposer, error) {
 	}, nil
 }
 
-func (p Proposer) closeConnection() {
+func (p *Proposer) closeConnection() {
 	p.clientConn.Close()
 }
 
-func (p Proposer) start() {
+func (p *Proposer) start() {
 	defer p.closeConnection()
 
 	for wrapper := range p.requestChannel {
@@ -249,7 +248,7 @@ func (p Proposer) start() {
 	}
 }
 
-func (p Proposer) propose(args [][]byte) (*ProposalResponse, error) {
+func (p *Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 	signer, err := signerLib.NewSigner(signerConfig)
 
 	if err != nil {
@@ -257,7 +256,7 @@ func (p Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 		return nil, err
 	}
 
-	testInput := pb.ChaincodeInput{
+	invokeInput := pb.ChaincodeInput{
 		IsInit: false,
 		Args:   args,
 	}
@@ -265,7 +264,7 @@ func (p Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 	spec := &pb.ChaincodeSpec{
 		Type:        pb.ChaincodeSpec_Type(pb.ChaincodeSpec_Type_value[chaincodeLang]),
 		ChaincodeId: &pb.ChaincodeID{Name: chaincodeName},
-		Input:       &testInput,
+		Input:       &invokeInput,
 	}
 
 	// Build the ChaincodeInvocationSpec message
@@ -471,7 +470,7 @@ func (s *Submitter) connectToOrderer(tartgetOrdererAddress string) error {
 	return nil
 }
 
-func (s Submitter) start() {
+func (s *Submitter) start() {
 	defer s.broadcastClient.Close()
 
 	for wrapper := range s.submitChannel {
@@ -507,7 +506,7 @@ func (s Submitter) start() {
 	}
 }
 
-func (s Submitter) submit(env *pcommon.Envelope) error {
+func (s *Submitter) submit(env *pcommon.Envelope) error {
 	// send the envelope for ordering
 	if err := s.broadcastClient.Send(env); err != nil {
 		fmt.Println("error sending transaction for update function", 500, err)
@@ -589,7 +588,7 @@ func createDeliverGroup(ctx context.Context, txID string) (*chaincode.DeliverGro
 	return dg, nil
 }
 
-func (l SubmissionListener) start() error {
+func (l *SubmissionListener) start() error {
 	if l.Dg != nil && l.ctx != nil {
 		// wait for event that contains the txid from all peers
 		submissionChannel := make(chan *pb.FilteredTransaction)
@@ -697,32 +696,42 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	return
 }
 
-func NewDeliverGroup(
-	deliverClients []pb.DeliverClient,
-	peerAddresses []string,
-	signer identity.SignerSerializer,
-	certificate tls.Certificate,
-	channelID string,
-	txid string,
-) *chaincode.DeliverGroup {
-	clients := make([]*chaincode.DeliverClient, len(deliverClients))
-	for i, client := range deliverClients {
-		dc := &chaincode.DeliverClient{
-			Client:  client,
-			Address: peerAddresses[i],
-		}
-		clients[i] = dc
+func queryHandler(res http.ResponseWriter, req *http.Request) {
+	// =========================== PROPOSE PHASE ===========================
+	proposeRequest, err := resolveHttpRequest(req)
+
+	if err != nil {
+		http.Error(res, "can't read body", http.StatusBadRequest)
 	}
 
-	dg := &chaincode.DeliverGroup{
-		Clients:     clients,
-		Certificate: certificate,
-		ChannelID:   channelID,
-		TxID:        txid,
-		Signer:      signer,
+	responseChan := make(chan ProposalResponse)
+	fmt.Println(proposeRequest)
+
+	args := packArgs(proposeRequest, false)
+
+	proposalWrapper := ProposalWrapper{
+		RequestArgs:             args,
+		proposalResponseChannel: responseChan,
 	}
 
-	return dg
+	var proposalResponse ProposalResponse
+
+	// send proposal to proposer
+	invokeChannel <- proposalWrapper // may change to query channel, if needed!
+	proposalResponse = <-responseChan
+
+	proposalResp := proposalResponse.Content[0]
+
+	fmt.Println(string(proposalResp.Response.Payload))
+	fmt.Println(string(proposalResp.Response.Message))
+
+	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
+		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprint(res, string(proposalResp.Response.Payload))
+	return
 }
 
 func resolveHttpRequest(req *http.Request) (*ProposeRequest, error) {
