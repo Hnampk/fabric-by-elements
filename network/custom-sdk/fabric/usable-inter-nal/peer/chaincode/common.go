@@ -829,7 +829,7 @@ func (dg *DeliverGroup) ClientWait(dc *DeliverClient) {
 // Listen waits for all deliver client connections in the group to
 // either receive a block with the txid, an error, or for the
 // context to timeout
-func (dg *DeliverGroup) Listen(ctx context.Context, txIDChannel chan *pb.FilteredTransaction) error {
+func (dg *DeliverGroup) Listen(ctx context.Context, txIdChannel chan *pb.FilteredTransaction) error {
 	if len(dg.Clients) == 0 {
 		return nil
 	}
@@ -860,7 +860,7 @@ func (dg *DeliverGroup) Listen(ctx context.Context, txIDChannel chan *pb.Filtere
 // ClientListen clones ClientWait method
 // ClientListen waits for the specified deliver client to receive
 // a block event, and dont care about the txid
-func (dg *DeliverGroup) ClientListen(dc *DeliverClient, txIDChannel chan *pb.FilteredTransaction, errChan chan string) {
+func (dg *DeliverGroup) ClientListen(dc *DeliverClient, txIdChannel chan *pb.FilteredTransaction, errChan chan string) {
 	defer dg.wg.Done()
 	for {
 		resp, err := dc.Connection.Recv()
@@ -879,7 +879,7 @@ func (dg *DeliverGroup) ClientListen(dc *DeliverClient, txIDChannel chan *pb.Fil
 				// 	err = errors.Errorf("transaction invalidated with status (%s)", tx.TxValidationCode)
 				// 	dg.setError(err)
 				// }
-				txIDChannel <- tx
+				txIdChannel <- tx
 			}
 		case *pb.DeliverResponse_Status:
 			err = errors.Errorf("deliver completed with status (%s) before txid received", r.Status)

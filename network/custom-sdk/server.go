@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -15,8 +14,6 @@ import (
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/chaincode"
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
-	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/identity"
-	redis "github.com/go-redis/redis/v8"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pcommon "github.com/hyperledger/fabric-protos-go/common"
 
@@ -79,57 +76,37 @@ type TransactionWithStatus struct {
 	ResponseChannel chan bool
 }
 
-type ProposalResponseStatus int
-
-const (
-	ProposalResponseStatus_PROPOSED  ProposalResponseStatus = 1
-	ProposalResponseStatus_SUBMITTED ProposalResponseStatus = 2
-	ProposalResponseStatus_REJECTED  ProposalResponseStatus = 3
-)
-
-type ProposalResponseRedis struct {
-	Nonce            int
-	ProposalResponse ProposalResponse
-	Status           ProposalResponseStatus
+type EventResponse struct {
+	txID    string
+	status  bool
+	errCode pb.TxValidationCode
 }
 
-// ============== DTO ===============
+// var concurrency = true
 
-type RespPayloadDTO struct {
-	Account                    string
-	Operator                   string
-	Value                      string
-	TxID                       string
-	IsExternalValidationNeeded bool
-}
+// type Nonce struct {
+// 	value map[string]int
+// 	mux   sync.Mutex
+// }
 
-// ============== End DTO ===============
+// func (n *Nonce) Lock() {
+// 	n.mux.Lock()
+// }
 
-var concurrency = false
+// func (n *Nonce) Unlock() {
+// 	n.mux.Unlock()
+// }
 
-type Nonce struct {
-	value map[string]int
-	mux   sync.Mutex
-}
-
-func (n *Nonce) Lock() {
-	n.mux.Lock()
-}
-
-func (n *Nonce) Unlock() {
-	n.mux.Unlock()
-}
-
-// Inc increments the counter for the given key.
-func (n *Nonce) Inc(key string) int {
-	if concurrency {
-		n.mux.Lock()
-		defer n.mux.Unlock()
-	}
-	n.value[key]++
-	// Lock so only one goroutine at a time can access the map c.v.
-	return n.value[key]
-}
+// // Inc increments the counter for the given key.
+// func (n *Nonce) Inc(key string) int {
+// 	if concurrency {
+// 		n.mux.Lock()
+// 		defer n.mux.Unlock()
+// 	}
+// 	n.value[key]++
+// 	// Lock so only one goroutine at a time can access the map c.v.
+// 	return n.value[key]
+// }
 
 // hard-code for test only
 const peerAddress = "peer0.org1.example.com:7051"
@@ -157,9 +134,7 @@ var deliverClients = []pb.DeliverClient{}
 */
 var responseChannelMap = cmap.New()
 
-var nonce Nonce
-var rdb *redis.Client
-var rdbCtx = context.Background()
+// var nonce Nonce
 
 func main() {
 	if len(os.Args) < 2 {
@@ -196,18 +171,11 @@ func main() {
 		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
 	}
 
-	// redis setup
-	rdb = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
-
 	initProposerPool(workerNum)
 	err = initSubmitterPool(workerNum)
 	initListenerPool(1)
 
-	nonce = Nonce{value: make(map[string]int)}
+	// nonce = Nonce{value: make(map[string]int)}
 
 	if err != nil {
 		fmt.Println("An error occurred while initSubmitterPool: ", err)
@@ -217,7 +185,6 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/invoke", invokeHandler)
-	mux.HandleFunc("/invokeWithNonce", invokeHandlerWithNonce)
 	mux.HandleFunc("/query", queryHandler)
 	// listen and serve
 	port := "8090"
@@ -393,6 +360,37 @@ func initSubmitterPool(poolSize int) error {
 		submitter.submitChannel = submitChannel
 
 		go submitter.start()
+	}
+
+	return nil
+}
+
+func sendToSubmitter(proposalResponse ProposalResponse) error {
+
+	responseChannel := make(chan EventResponse)
+	responseChannelMap.Set(proposalResponse.TxID, responseChannel)
+	defer responseChannelMap.Remove(proposalResponse.TxID)
+
+	errChan := make(chan error)
+
+	submitChannel <- SignedProposalWrapper{
+		proposalResponse: proposalResponse,
+		errorChannel:     errChan,
+	}
+
+	if err := <-errChan; err != nil {
+		return err
+	}
+
+	select {
+	case <-time.After(time.Second * 30):
+		return errors.Errorf("submit timeout!")
+	case submissionEvent := <-responseChannel:
+		if !submissionEvent.status {
+			// should add revert logic here to update Chaincode internal world state
+
+			return errors.Errorf("submit failed!, TxValidationCode: %s", submissionEvent.errCode)
+		}
 	}
 
 	return nil
@@ -614,9 +612,7 @@ func (l *SubmissionListener) start() error {
 
 func onReceiveSubmissionEvent(tx *pb.FilteredTransaction) {
 	if tmp, ok := responseChannelMap.Get(tx.Txid); ok {
-
 		responseChannel := tmp.(chan EventResponse)
-
 		status := true
 
 		if tx.TxValidationCode != pb.TxValidationCode_VALID {
@@ -633,405 +629,8 @@ func onReceiveSubmissionEvent(tx *pb.FilteredTransaction) {
 	}
 }
 
-func resolveHttpRequest(req *http.Request) (*ProposeRequest, error) {
-	var proposeRequest ProposeRequest
-
-	body, err := ioutil.ReadAll(req.Body)
-
-	if err != nil {
-		fmt.Printf("Error reading body: %v", err)
-		return nil, err
-	}
-
-	json.Unmarshal(body, &proposeRequest)
-
-	return &proposeRequest, nil
-}
-
-func packArgs(proposeRequest *ProposeRequest, isWithNonce bool) [][]byte {
-	fcn := proposeRequest.FuncName
-	args := [][]byte{[]byte(fcn)}
-
-	for _, element := range proposeRequest.Args {
-		args = append(args, []byte(element))
-	}
-
-	if isWithNonce {
-		// only invoke-request need nonce
-		args = append(args, []byte(strconv.Itoa(proposeRequest.Nonce)))
-	}
-
-	return args
-}
-
-func NewDeliverGroup(
-	deliverClients []pb.DeliverClient,
-	peerAddresses []string,
-	signer identity.SignerSerializer,
-	certificate tls.Certificate,
-	channelID string,
-	txid string,
-) *chaincode.DeliverGroup {
-	clients := make([]*chaincode.DeliverClient, len(deliverClients))
-	for i, client := range deliverClients {
-		dc := &chaincode.DeliverClient{
-			Client:  client,
-			Address: peerAddresses[i],
-		}
-		clients[i] = dc
-	}
-
-	dg := &chaincode.DeliverGroup{
-		Clients:     clients,
-		Certificate: certificate,
-		ChannelID:   channelID,
-		TxID:        txid,
-		Signer:      signer,
-	}
-
-	return dg
-}
-
-func getAccountBalanceByNonce(account string, nonce int) (float64, error) {
-	chaincodeFunc := "getstandard"
-	args := [][]byte{[]byte(chaincodeFunc), []byte(account + "-" + strconv.Itoa(nonce))}
-
-	var proposalResponse ProposalResponse
-
-	responseChan := make(chan ProposalResponse)
-
-	proposalWrapper := ProposalWrapper{
-		RequestArgs:             args,
-		proposalResponseChannel: responseChan,
-	}
-
-	// send proposal to proposer
-	invokeChannel <- proposalWrapper // may change to query channel, if needed!
-	proposalResponse = <-responseChan
-
-	proposalResp := proposalResponse.Content[0]
-
-	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
-		return -1, proposalResponse.Error
-	}
-
-	if len(proposalResp.Response.Payload) < 1 {
-		// not exist in ledger
-		return -1, nil
-	}
-
-	balanceFloat, err := strconv.ParseFloat(string(proposalResp.Response.Payload), 64)
-
-	if err != nil {
-
-	}
-
-	return balanceFloat, nil
-}
-
-func putAccountBalanceByNonce(account string, nonce int, value float64) error {
-	fmt.Println("putAccountBalanceByNonce")
-	chaincodeFunc := "putstandardwithget"
-	args := [][]byte{[]byte(chaincodeFunc), []byte(account + "-" + strconv.Itoa(nonce)), []byte(strconv.FormatFloat(value, 'f', -1, 64))}
-
-	var proposalResponse ProposalResponse
-
-	responseChan := make(chan ProposalResponse)
-
-	proposalWrapper := ProposalWrapper{
-		RequestArgs:             args,
-		proposalResponseChannel: responseChan,
-	}
-
-	// send proposal to proposer
-	invokeChannel <- proposalWrapper // may change to query channel, if needed!
-	proposalResponse = <-responseChan
-
-	// submit to orderer
-	submitErr := sendToSubmitter(proposalResponse)
-
-	if submitErr != nil {
-		return submitErr
-	}
-
-	return nil
-}
-
-type EventResponse struct {
-	txID    string
-	status  bool
-	errCode pb.TxValidationCode
-}
-
-func sendToSubmitter(proposalResponse ProposalResponse) error {
-
-	responseChannel := make(chan EventResponse)
-	responseChannelMap.Set(proposalResponse.TxID, responseChannel)
-	defer responseChannelMap.Remove(proposalResponse.TxID)
-
-	errChan := make(chan error)
-
-	submitChannel <- SignedProposalWrapper{
-		proposalResponse: proposalResponse,
-		errorChannel:     errChan,
-	}
-
-	if err := <-errChan; err != nil {
-		return err
-	}
-
-	select {
-	case <-time.After(time.Second * 30):
-		return errors.Errorf("submit timeout!")
-	case submissionEvent := <-responseChannel:
-		if !submissionEvent.status {
-			return errors.Errorf("submit failed!, TxValidationCode: %s", submissionEvent.errCode)
-		}
-	}
-
-	return nil
-}
-
-func saveSignedProposalToRedisByNonce(account string, nonce int, proposalResponse ProposalResponse) *redis.StatusCmd {
-	proposalResponseRedisByte, _ := json.Marshal(ProposalResponseRedis{
-		Nonce:            nonce,
-		ProposalResponse: proposalResponse,
-		Status:           ProposalResponseStatus_PROPOSED,
-	})
-	currentNonceRedisKey := account + "-" + strconv.Itoa(nonce)
-
-	return rdb.Set(rdbCtx, currentNonceRedisKey, proposalResponseRedisByte, 0)
-}
-
-func updateSubmittedProposalToRedisByNonce(account string, nonce int, proposalResponse ProposalResponse) *redis.StatusCmd {
-	rdbChannel := account + "-" + strconv.Itoa(nonce)
-	defer rdb.Publish(rdbCtx, rdbChannel, "submitted").Err()
-
-	proposalResponseRedisByte, _ := json.Marshal(ProposalResponseRedis{
-		Nonce:            nonce,
-		ProposalResponse: proposalResponse,
-		Status:           ProposalResponseStatus_SUBMITTED,
-	})
-	currentNonceRedisKey := account + "-" + strconv.Itoa(nonce)
-
-	return rdb.Set(rdbCtx, currentNonceRedisKey, proposalResponseRedisByte, 0)
-}
-func updateRejectedProposalToRedisByNonce(account string, nonce int, proposalResponse ProposalResponse) *redis.StatusCmd {
-	rdbChannel := account + "-" + strconv.Itoa(nonce)
-	defer rdb.Publish(rdbCtx, rdbChannel, "rejected").Err()
-
-	proposalResponseRedisByte, _ := json.Marshal(ProposalResponseRedis{
-		Nonce:            nonce,
-		ProposalResponse: proposalResponse,
-		Status:           ProposalResponseStatus_REJECTED,
-	})
-	currentNonceRedisKey := account + "-" + strconv.Itoa(nonce)
-
-	return rdb.Set(rdbCtx, currentNonceRedisKey, proposalResponseRedisByte, 0)
-}
-
-// for testing ONLY
-func invokeHandlerWithNonce(res http.ResponseWriter, req *http.Request) {
-	// proposeRequest, err := resolveHttpRequest(req)
-	// if err != nil {
-	// 	http.Error(res, "can't read body", http.StatusBadRequest)
-	// 	return
-	// }
-
-	// accountId := proposeRequest.Args[0]
-	// proposeRequest.Nonce, _ = strconv.Atoi(proposeRequest.Args[3])
-	// currentNonceInt := proposeRequest.Nonce
-	// responseChan := make(chan ProposalResponse)
-	// // trick: included nonce in request body args
-	// args := packArgs(proposeRequest, false)
-	// fmt.Println(proposeRequest)
-
-	// proposalWrapper := ProposalWrapper{
-	// 	RequestArgs:             args,
-	// 	proposalResponseChannel: responseChan,
-	// }
-
-	// var proposalResponse ProposalResponse
-
-	// // send proposal to proposer
-	// invokeChannel <- proposalWrapper
-	// proposalResponse = <-responseChan
-
-	// proposalResp := proposalResponse.Content[0]
-
-	// if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
-	// 	updateRejectedProposalToRedisByNonce(accountId, currentNonceInt, proposalResponse)
-
-	// 	fmt.Println(proposalResp.Response)
-	// 	http.Error(res, "shim.ERRORTHRESHOLD "+proposalResp.Response.String(), http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// // Got non-error response
-	// /*
-	// 	TODO:
-	// 		(1) Save tx to redis, with nonce
-	// 		(2) Check response validation state: need validate OR not
-	// 			- if need validate =>	+ get account balance with latest nonce
-	// 									+ get cached redis by account, until find out the tx with nonce -1
-	// 									+ validate balance after commit
-	// 										=> if not OK => reject, do not submit
-	// 										=> if OK => (3) + put state by nonce
-	// 			- if no need validate => (3)
-	// 		(3) submit to orderer
-	// */
-
-	// _ = saveSignedProposalToRedisByNonce(accountId, currentNonceInt, proposalResponse)
-
-	// var payloadDTO RespPayloadDTO
-	// _ = json.Unmarshal(proposalResp.Response.Payload, &payloadDTO)
-
-	// latestBalance := float64(-1)
-
-	// if payloadDTO.IsExternalValidationNeeded {
-	// 	fmt.Println("Need ExternalValidationNeeded")
-
-	// 	// In this case, Chaincode can not check account balance of the previous nonce
-	// 	// => we need to check it externally. Only submit the signed proposal to orderer if valid balance
-	// 	/* TODO:
-	// 	(1) getstate the latest balance => latest nonce in ledger
-	// 	(2) find all the proposed txs NONCE where latest_nonce_ledger < NONCE < currentNonceInt
-	// 		in redis
-	// 	(3) sum up (1), (2) and the present tx value to check if balance valid
-	// 	(4) putstate for missing nonce in ledger
-	// 	(5) update tx state in redis
-	// 	(6) if valid, submit to orderer. If not => ignore the signed proposal
-	// 	*/
-	// 	latestNonceInLedger := currentNonceInt
-
-	// 	for latestBalance < 0 {
-	// 		latestNonceInLedger--
-
-	// 		if latestNonceInLedger < 1 {
-	// 			break
-	// 		}
-
-	// 		latestBalance, err = getAccountBalanceByNonce(accountId, latestNonceInLedger)
-
-	// 		if err != nil {
-	// 			// got error while query
-	// 			// should stop commiting, and redo later
-	// 			http.Error(res, err.Error(), http.StatusInternalServerError)
-	// 			return
-	// 		}
-	// 	}
-
-	// 	if latestNonceInLedger < currentNonceInt-1 {
-	// 		// got latest balance record in ledger, at nonce = latestNonceInLedger
-	// 		// now find missing txs in redis!
-	// 		if latestNonceInLedger > 0 {
-	// 			fmt.Println("Found in Ledger, Nonce is", latestNonceInLedger, ", balance is", latestBalance)
-	// 			fmt.Println("missing txs with nonce from", latestNonceInLedger+1, "to", currentNonceInt-1)
-	// 			fmt.Println("Let's find in Redis!")
-
-	// 			for latestNonceInLedger < currentNonceInt-1 {
-	// 				latestNonceInLedger++
-
-	// 				redisKey := accountId + "-" + strconv.Itoa(latestNonceInLedger)
-	// 				fmt.Println("find in redis:", redisKey)
-
-	// 				rdbResponse := rdb.Get(rdbCtx, redisKey)
-	// 				rdbResponseBytes, _ := rdbResponse.Bytes()
-	// 				var proposalResponseRedis ProposalResponseRedis
-
-	// 				if len(rdbResponseBytes) < 1 {
-	// 					// not in ledger, not in redis => where were the tx with nonce=latestNonceInLedger?
-	// 					http.Error(res, "missing nonce!", http.StatusInternalServerError)
-	// 					return
-	// 				} else {
-	// 					_ = json.Unmarshal(rdbResponseBytes, &proposalResponseRedis)
-	// 				}
-
-	// 				if proposalResponseRedis.Status == ProposalResponseStatus_PROPOSED ||
-	// 					proposalResponseRedis.Status == ProposalResponseStatus_SUBMITTED {
-	// 					fmt.Println("got something")
-	// 					var payloadDTO RespPayloadDTO
-	// 					_ = json.Unmarshal(proposalResponseRedis.ProposalResponse.Content[0].Response.Payload, &payloadDTO)
-	// 					fmt.Println("payloadDTO", payloadDTO)
-
-	// 					var valueFloat float64
-
-	// 					if payloadDTO.IsExternalValidationNeeded {
-	// 						// there is another unsubmitted previous
-	// 					} else {
-	// 						valueFloat, _ = strconv.ParseFloat(payloadDTO.Value, 64)
-
-	// 						if payloadDTO.Operator == "-" {
-	// 							valueFloat = -valueFloat
-	// 						}
-
-	// 						latestBalance += valueFloat
-	// 					}
-
-	// 					if latestBalance < 0 {
-	// 						// Invalid balance
-	// 						// TODO:
-	// 						// (1) put state to ledger
-	// 						// (2) remove record in redis
-
-	// 						err := putAccountBalanceByNonce(accountId, currentNonceInt, latestBalance-valueFloat)
-
-	// 						if err != nil {
-	// 							fmt.Println("putAccountBalanceByNonce Error", err)
-	// 						}
-
-	// 						updateRejectedProposalToRedisByNonce(accountId, currentNonceInt, proposalResponse)
-
-	// 						http.Error(res, "Account balance not enough!", http.StatusInternalServerError)
-	// 						return
-	// 					}
-	// 				}
-	// 			}
-
-	// 			// continue submit to orderer
-	// 		} else {
-	// 			// there is no record in ledger!
-	// 			// => missing the first tx!
-	// 			// fix me: more logic!
-	// 			// <- time.After(time.Second * 5)
-	// 			http.Error(res, "Missing the first tx", http.StatusInternalServerError)
-	// 			return
-	// 		}
-	// 	}
-
-	// }
-
-	// //
-	// // =========================== SUBMIT PHASE ===========================
-	// submitErr := sendToSubmitter(proposalResponse)
-
-	// if submitErr != nil {
-	// 	http.Error(res, submitErr.Error(), http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// if payloadDTO.IsExternalValidationNeeded {
-	// 	err := putAccountBalanceByNonce(accountId, currentNonceInt, latestBalance)
-
-	// 	if err != nil {
-	// 		fmt.Println("putAccountBalanceByNonce Error", err)
-	// 	}
-
-	// }
-
-	// _ = updateSubmittedProposalToRedisByNonce(accountId, currentNonceInt, proposalResponse)
-
-	// if proposalResp.Response.Status <= shim.OK && len(proposalResp.Response.Payload) > 0 {
-	// 	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
-	// } else {
-	// 	// submitted, but fail tx!
-	// }
-	// return
-}
-
 func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	// =========================== PROPOSE PHASE ===========================
-
 	proposeRequest, err := resolveHttpRequest(req)
 
 	if err != nil {
@@ -1039,20 +638,19 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	accountId := proposeRequest.Args[0]
+	// accountId := proposeRequest.Args[0]
 
-	if !concurrency {
-		nonce.Lock()
-		// defer nonce.Unlock()
-	}
+	// if !concurrency {
+	// 	nonce.Lock()
+	// }
 
-	currentNonceInt := nonce.Inc(accountId)
-	proposeRequest.Nonce = currentNonceInt
+	// currentNonceInt := nonce.Inc(accountId)
+	// proposeRequest.Nonce = currentNonceInt
 
 	responseChan := make(chan ProposalResponse)
 	fmt.Println(proposeRequest)
 
-	args := packArgs(proposeRequest, true)
+	args := packArgs(proposeRequest, false)
 
 	proposalWrapper := ProposalWrapper{
 		RequestArgs:             args,
@@ -1065,203 +663,21 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	invokeChannel <- proposalWrapper
 	proposalResponse = <-responseChan
 
-	if !concurrency {
-		nonce.Unlock()
-	}
+	// if !concurrency {
+	// 	nonce.Unlock()
+	// }
 
 	proposalResp := proposalResponse.Content[0]
 
 	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
-		rdb.Set(rdbCtx, accountId+"-"+strconv.Itoa(currentNonceInt), ProposalResponseRedis{
-			Status: ProposalResponseStatus_REJECTED,
-		}, 0)
-		fmt.Println(proposalResp.Response)
-
-		// if !concurrency {
-		// 	nonce.Unlock()
-		// }
-		http.Error(res, "shim.ERRORTHRESHOLD "+proposalResp.Response.String(), http.StatusInternalServerError)
+		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
 		return
 	}
 
-	// Got non-error response
-	/*
-		TODO:
-			(1) Save tx to redis, with nonce
-			(2) Check response validation state: need validate OR not
-				- if need validate =>	+ get account balance with latest nonce
-										+ get cached redis by account, until find out the tx with nonce -1
-										+ validate balance after commit
-											=> if not OK => reject, do not submit
-											=> if OK => (3) + put state by nonce
-				- if no need validate => (3)
-			(3) submit to orderer
-	*/
-
-	_ = saveSignedProposalToRedisByNonce(accountId, currentNonceInt, proposalResponse)
-
-	var payloadDTO RespPayloadDTO
-	_ = json.Unmarshal(proposalResp.Response.Payload, &payloadDTO)
-
-	latestBalance := float64(-1)
-
-	if payloadDTO.IsExternalValidationNeeded {
-
-		// In this case, Chaincode can not check account balance of the previous nonce
-		// => we need to check it externally. Only submit the signed proposal to orderer if valid balance
-		/* TODO:
-		(1) getstate the latest balance => latest nonce in ledger
-		(2) find all the proposed txs NONCE where latest_nonce_ledger < NONCE < currentNonceInt
-			in redis
-		(3) sum up (1), (2) and the present tx value to check if balance valid
-		(4) putstate for missing nonce in ledger
-		(5) update tx state in redis
-		(6) if valid, submit to orderer. If not => ignore the signed proposal
-		*/
-		latestNonceInLedger := currentNonceInt
-
-		for latestBalance < 0 {
-			latestNonceInLedger--
-
-			if latestNonceInLedger < 1 {
-				break
-			}
-
-			latestBalance, err = getAccountBalanceByNonce(accountId, latestNonceInLedger)
-
-			if err != nil {
-				// if !concurrency {
-				// 	nonce.Unlock()
-				// }
-				// got error while query
-				// should stop commiting, and redo later
-				http.Error(res, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		if currentNonceInt == 1 {
-			// first commit
-			latestBalance = 0
-		} else {
-			if latestNonceInLedger < currentNonceInt-1 {
-				// got latest balance record in ledger, at nonce = latestNonceInLedger
-				// now find missing txs in redis!
-				if latestNonceInLedger > 0 {
-					fmt.Println("Found in Ledger, Nonce is", latestNonceInLedger, ", balance is", latestBalance)
-					fmt.Println("missing txs with nonce from", latestNonceInLedger+1, "to", currentNonceInt-1)
-
-					for latestNonceInLedger < currentNonceInt-1 {
-						latestNonceInLedger++
-
-						redisKey := accountId + "-" + strconv.Itoa(latestNonceInLedger)
-
-						rdbResponse := rdb.Get(rdbCtx, redisKey)
-						rdbResponseBytes, _ := rdbResponse.Bytes()
-						var proposalResponseRedis ProposalResponseRedis
-
-						if len(rdbResponseBytes) < 1 {
-							// if !concurrency {
-							// 	nonce.Unlock()
-							// }
-							// not in ledger, not in redis => where were the tx with nonce=latestNonceInLedger?
-							http.Error(res, "missing nonce!", http.StatusInternalServerError)
-							return
-						} else {
-							_ = json.Unmarshal(rdbResponseBytes, &proposalResponseRedis)
-						}
-
-						if proposalResponseRedis.Status == ProposalResponseStatus_PROPOSED ||
-							proposalResponseRedis.Status == ProposalResponseStatus_SUBMITTED {
-							var payloadDTO RespPayloadDTO
-							_ = json.Unmarshal(proposalResponseRedis.ProposalResponse.Content[0].Response.Payload, &payloadDTO)
-
-							var valueFloat float64
-
-							valueFloat, _ = strconv.ParseFloat(payloadDTO.Value, 64)
-
-							if payloadDTO.Operator == "-" {
-								valueFloat = -valueFloat
-							}
-
-							latestBalance += valueFloat
-
-							if latestBalance < 0 {
-								// if !concurrency {
-								// 	nonce.Unlock()
-								// }
-								// Invalid balance
-								// TODO:
-								// (1) put state to ledger
-								// (2) remove record in redis
-
-								err := putAccountBalanceByNonce(accountId, currentNonceInt, latestBalance-valueFloat)
-
-								if err != nil {
-									fmt.Println("putAccountBalanceByNonce Error", err)
-								}
-
-								updateRejectedProposalToRedisByNonce(accountId, currentNonceInt, proposalResponse)
-
-								http.Error(res, "Account balance not enough!", http.StatusInternalServerError)
-								return
-							}
-						}
-					}
-
-					// continue submit to orderer
-				} else {
-					// there is no record in ledger!
-					// => missing the first tx!
-					// fix me: more logic!
-
-					// if !concurrency {
-					// 	nonce.Unlock()
-					// }
-
-					http.Error(res, "Missing the first tx "+strconv.Itoa(latestNonceInLedger), http.StatusInternalServerError)
-					return
-				}
-			}
-		}
-
-		// combine with current tx
-		valueFloat, _ := strconv.ParseFloat(payloadDTO.Value, 64)
-
-		if payloadDTO.Operator == "-" {
-			valueFloat = -valueFloat
-		}
-
-		latestBalance += valueFloat
-
-		if latestBalance < 0 {
-			// if !concurrency {
-			// 	nonce.Unlock()
-			// }
-			// Invalid balance
-			// TODO:
-			// (1) put state to ledger
-			// (2) remove record in redis
-
-			err := putAccountBalanceByNonce(accountId, currentNonceInt, latestBalance-valueFloat)
-
-			if err != nil {
-				fmt.Println("putAccountBalanceByNonce Error", err)
-			}
-
-			updateRejectedProposalToRedisByNonce(accountId, currentNonceInt, proposalResponse)
-
-			http.Error(res, "Account balance not enough!", http.StatusInternalServerError)
-			return
-		}
-
-	}
-
-	if proposalResp.Response.Status <= shim.OK && len(proposalResp.Response.Payload) > 0 {
-		fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID+" "+strconv.Itoa(currentNonceInt))
-	} else {
-		// submitted, but fail tx!
-		fmt.Fprint(res, " submitted, but fail tx, txid: "+proposalResponse.TxID+" "+strconv.Itoa(currentNonceInt))
+	if proposalResponse.Error != nil {
+		// nonce.Unlock()
+		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	//
@@ -1275,16 +691,8 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if payloadDTO.IsExternalValidationNeeded && latestBalance >= 0 {
-		err := putAccountBalanceByNonce(accountId, currentNonceInt, latestBalance)
-
-		if err != nil {
-			fmt.Println("putAccountBalanceByNonce Error", err)
-		}
-	}
-
-	_ = updateSubmittedProposalToRedisByNonce(accountId, currentNonceInt, proposalResponse)
-
+	fmt.Println(string(proposalResponse.Content[0].Response.Payload))
+	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
 	return
 }
 
@@ -1326,13 +734,71 @@ func queryHandler(res http.ResponseWriter, req *http.Request) {
 	return
 }
 
-func bytesToBool(data []byte) (bool, error) {
-	var valueBool bool
-	err := json.Unmarshal(data, &valueBool)
+func resolveHttpRequest(req *http.Request) (*ProposeRequest, error) {
+	var proposeRequest ProposeRequest
+
+	body, err := ioutil.ReadAll(req.Body)
 
 	if err != nil {
-		return false, err
+		fmt.Printf("Error reading body: %v", err)
+		return nil, err
 	}
 
-	return valueBool, nil
+	json.Unmarshal(body, &proposeRequest)
+
+	return &proposeRequest, nil
+}
+
+func packArgs(proposeRequest *ProposeRequest, isWithNonce bool) [][]byte {
+	fcn := proposeRequest.FuncName
+	args := [][]byte{[]byte(fcn)}
+
+	for _, element := range proposeRequest.Args {
+		args = append(args, []byte(element))
+	}
+
+	if isWithNonce {
+		// only invoke-request need nonce
+		args = append(args, []byte(strconv.Itoa(proposeRequest.Nonce)))
+	}
+
+	return args
+}
+
+func queryHandler(res http.ResponseWriter, req *http.Request) {
+	// =========================== PROPOSE PHASE ===========================
+	proposeRequest, err := resolveHttpRequest(req)
+
+	if err != nil {
+		http.Error(res, "can't read body", http.StatusBadRequest)
+	}
+
+	responseChan := make(chan ProposalResponse)
+	fmt.Println(proposeRequest)
+
+	args := packArgs(proposeRequest, false)
+
+	proposalWrapper := ProposalWrapper{
+		RequestArgs:             args,
+		proposalResponseChannel: responseChan,
+	}
+
+	var proposalResponse ProposalResponse
+
+	// send proposal to proposer
+	invokeChannel <- proposalWrapper // may change to query channel, if needed!
+	proposalResponse = <-responseChan
+
+	proposalResp := proposalResponse.Content[0]
+
+	fmt.Println(string(proposalResp.Response.Payload))
+	fmt.Println(string(proposalResp.Response.Message))
+
+	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
+		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprint(res, string(proposalResp.Response.Payload))
+	return
 }

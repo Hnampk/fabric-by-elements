@@ -6,3 +6,6 @@
 network/peer/data/
 network/orderer/data/
 network/sdk/data/
+
+network/custom-sdk/server
+network/*.block
