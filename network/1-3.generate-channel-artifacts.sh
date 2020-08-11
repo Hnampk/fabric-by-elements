@@ -1,5 +1,5 @@
 
-CHANNEL_NAME=mychannel
+CHANNEL_NAME=vnpay-channel
 
 echo "##########################################################"
 echo "#########  Generating Orderer Genesis block ##############"

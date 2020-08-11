@@ -26,7 +26,6 @@ package main
  * 2 specific Hyperledger Fabric specific libraries for Smart Contracts
  */
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -71,8 +70,6 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) pb.Response 
 		return s.delete(APIstub, args)
 	} else if function == "putstandard" {
 		return s.putStandard(APIstub, args)
-	} else if function == "putstandardwithget" {
-		return s.putStandardWithGet(APIstub, args)
 	} else if function == "getstandard" {
 		return s.getStandard(APIstub, args)
 	} else if function == "delstandard" {
@@ -95,102 +92,23 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) pb.Response 
  *
  * @return A response structure indicating success or failure with a message
  */
-
-var temp = 1
-
 func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
 	// Check we have a valid number of args
-	if len(args) != 4 {
-		return shim.Error("Incorrect number of arguments, expecting 4, got " + strconv.Itoa(len(args)))
+	if len(args) != 3 {
+		return shim.Error("Incorrect number of arguments, expecting 3")
 	}
 
 	// Extract the args
 	name := args[0]
-	value := args[1]
 	op := args[2]
-	nonce := args[3]
-	fmt.Println("nonce", nonce)
-	nonceInt, nonceErr := strconv.Atoi(nonce)
-
-	if nonceErr != nil {
-		return shim.Error("invalid nonce " + nonce)
-	}
-
 	_, err := strconv.ParseFloat(args[1], 64)
 	if err != nil {
 		return shim.Error("Provided value was not a number")
 	}
 
-	valueFloat, err := strconv.ParseFloat(value, 64)
-
-	if err != nil {
-		return shim.Error(fmt.Sprintf("Invalid input value %s", value))
-	}
-
 	// Make sure a valid operator is provided
 	if op != "+" && op != "-" {
 		return shim.Error(fmt.Sprintf("Operator %s is unrecognized", op))
-	}
-
-	var isExternalValidationNeeded bool = true
-	var accountBalanceInLedger float64 = -1
-	var accountBalanceInLedgerStr string
-	var newBalance float64 = -1
-
-	if nonceInt > 1 {
-		val := s.getStandard(APIstub, []string{name + "-" + strconv.Itoa(nonceInt-1)})
-
-		fmt.Println("getStandard Response", val)
-		if len(val.Payload) < 1 {
-			// no record of previous nonce
-			fmt.Println("no record of previous nonce")
-			isExternalValidationNeeded = true
-		} else {
-			accountBalanceInLedgerStr = string(val.Payload)
-			var parseBalanceErr error
-			accountBalanceInLedger, parseBalanceErr = strconv.ParseFloat(accountBalanceInLedgerStr, 64)
-
-			if parseBalanceErr != nil {
-				fmt.Sprintf("parseBalanceErr: %s", parseBalanceErr.Error())
-			}
-
-			isExternalValidationNeeded = false
-		}
-	} else {
-		// first tx of account
-		fmt.Println("first tx of account")
-		accountBalanceInLedgerStr = "0"
-		accountBalanceInLedger = 0
-		isExternalValidationNeeded = false
-	}
-
-	if accountBalanceInLedger >= 0 {
-		fmt.Println("accountBalanceInLedger", accountBalanceInLedger)
-		switch op {
-		case "+":
-			newBalance = accountBalanceInLedger + valueFloat
-		case "-":
-			newBalance = accountBalanceInLedger - valueFloat
-			if newBalance < 0 {
-				// save result into ledger, {key: name-nonce, value: balance}
-				putResp := s.putStandard(APIstub, []string{name + "-" + nonce, accountBalanceInLedgerStr})
-				if putResp.Status != 200 {
-					fmt.Sprintf("Failed to put state: %s", putResp.GetMessage())
-				}
-
-				// Trick: if return error here, the putstandard method above won't be added to ledger
-				response := pb.Response{
-					Status:  200,
-					Message: "Account balance not enough!",
-				}
-				fmt.Println(response)
-
-				return response
-
-				// return shim.Error(fmt.Sprintf("Account balance not enough!"))
-			}
-		}
-
 	}
 
 	// Retrieve info needed for the update procedure
@@ -200,7 +118,7 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 	// Create the composite key that will allow us to query for all deltas on a particular variable
 	compositeKey, compositeErr := APIstub.CreateCompositeKey(compositeIndexName, []string{name, op, args[1], txid})
 	if compositeErr != nil {
-		return shim.Error(fmt.Sprintf("Could not create a composite key for %s: %t", name, compositeErr.Error()))
+		return shim.Error(fmt.Sprintf("Could not create a composite key for %s: %s", name, compositeErr.Error()))
 	}
 
 	// Save the composite key index
@@ -209,45 +127,12 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 		return shim.Error(fmt.Sprintf("Could not put operation for %s in the ledger: %s", name, compositePutErr.Error()))
 	}
 
-	if newBalance >= 0 {
-		// save result into ledger, {key: name-nonce, value: balance}
-		putResp := s.putStandard(APIstub, []string{name + "-" + nonce, strconv.FormatFloat(newBalance, 'f', -1, 64)})
-
-		if putResp.Status != 200 {
-			fmt.Sprintf("Failed to put state: %s", putResp.GetMessage())
-		}
+	eventErr := APIstub.SetEvent("updateEvent", []byte("event-hello"))
+	if eventErr != nil {
+		return shim.Error(fmt.Sprintf("Failed to emit event"))
 	}
 
-	// eventErr := APIstub.SetEvent("updateEvent", []byte("event-hello"))
-	// if eventErr != nil {
-	// 	return shim.Error(fmt.Sprintf("Failed to emit event"))
-	// }
-
-	type RespPayloadDTO struct {
-		Account                    string
-		Operator                   string
-		Value                      string
-		TxID                       string
-		IsExternalValidationNeeded bool
-	}
-
-	respPayloadDTO := RespPayloadDTO{
-		IsExternalValidationNeeded: isExternalValidationNeeded,
-		Account:                    name,
-		Operator:                   op,
-		Value:                      value,
-		TxID:                       txid,
-	}
-
-	payloadDTO, _ := json.Marshal(respPayloadDTO)
-
-	response := pb.Response{
-		Status:  200,
-		Message: fmt.Sprintf("Successfully added %s%s to %s---", op, args[1], name),
-		Payload: payloadDTO,
-	}
-
-	return response
+	return shim.Success([]byte(fmt.Sprintf("Successfully added %s%s to %s", op, args[1], name)))
 }
 
 /**
@@ -502,26 +387,6 @@ func main() {
  * All functions below this are for testing traditional editing of a single row
  */
 func (s *SmartContract) putStandard(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
-	name := args[0]
-	valStr := args[1]
-
-	// _, getErr := APIstub.GetState(name)
-	// if getErr != nil {
-	// 	return shim.Error(fmt.Sprintf("Failed to retrieve the state of %s: %s", name, getErr.Error()))
-	// }
-
-	putErr := APIstub.PutState(name, []byte(valStr))
-	if putErr != nil {
-		return shim.Error(fmt.Sprintf("Failed to put state: %s", putErr.Error()))
-	}
-
-	return shim.Success(nil)
-}
-
-/**
- * All functions below this are for testing traditional editing of a single row
- */
-func (s *SmartContract) putStandardWithGet(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
 	name := args[0]
 	valStr := args[1]
 

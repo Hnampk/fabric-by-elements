@@ -1,5 +1,5 @@
 {
-    "address": "127.0.0.1:7053",
+    "address": "172.16.79.8:7053",
     "dial_timeout": "10s",
     "tls_required": false,
     "client_auth_required": false,

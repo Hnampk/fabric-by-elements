@@ -829,14 +829,14 @@ func (dg *DeliverGroup) ClientWait(dc *DeliverClient) {
 // Listen waits for all deliver client connections in the group to
 // either receive a block with the txid, an error, or for the
 // context to timeout
-func (dg *DeliverGroup) Listen(ctx context.Context, txIdChannel chan string) error {
+func (dg *DeliverGroup) Listen(ctx context.Context, txIDChannel chan *pb.FilteredTransaction) error {
 	if len(dg.Clients) == 0 {
 		return nil
 	}
 	dg.wg.Add(len(dg.Clients))
 	errChan := make(chan string)
 	for _, client := range dg.Clients {
-		go dg.ClientListen(client, txIdChannel, errChan)
+		go dg.ClientListen(client, txIDChannel, errChan)
 	}
 	readyCh := make(chan struct{})
 	go dg.WaitForWG(readyCh)
@@ -860,7 +860,7 @@ func (dg *DeliverGroup) Listen(ctx context.Context, txIdChannel chan string) err
 // ClientListen clones ClientWait method
 // ClientListen waits for the specified deliver client to receive
 // a block event, and dont care about the txid
-func (dg *DeliverGroup) ClientListen(dc *DeliverClient, txIdChannel chan string, errChan chan string) {
+func (dg *DeliverGroup) ClientListen(dc *DeliverClient, txIDChannel chan *pb.FilteredTransaction, errChan chan string) {
 	defer dg.wg.Done()
 	for {
 		resp, err := dc.Connection.Recv()
@@ -875,12 +875,11 @@ func (dg *DeliverGroup) ClientListen(dc *DeliverClient, txIdChannel chan string,
 		case *pb.DeliverResponse_FilteredBlock:
 			filteredTransactions := r.FilteredBlock.FilteredTransactions
 			for _, tx := range filteredTransactions {
-				if tx.TxValidationCode != pb.TxValidationCode_VALID {
-					err = errors.Errorf("transaction invalidated with status (%s)", tx.TxValidationCode)
-					dg.setError(err)
-					txIdChannel <- "Error"
-				}
-				txIdChannel <- tx.Txid
+				// if tx.TxValidationCode != pb.TxValidationCode_VALID {
+				// 	err = errors.Errorf("transaction invalidated with status (%s)", tx.TxValidationCode)
+				// 	dg.setError(err)
+				// }
+				txIDChannel <- tx
 			}
 		case *pb.DeliverResponse_Status:
 			err = errors.Errorf("deliver completed with status (%s) before txid received", r.Status)
