@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -14,6 +15,7 @@ import (
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/chaincode"
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
+	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/identity"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pcommon "github.com/hyperledger/fabric-protos-go/common"
 
@@ -82,33 +84,7 @@ type EventResponse struct {
 	errCode pb.TxValidationCode
 }
 
-// var concurrency = true
-
-// type Nonce struct {
-// 	value map[string]int
-// 	mux   sync.Mutex
-// }
-
-// func (n *Nonce) Lock() {
-// 	n.mux.Lock()
-// }
-
-// func (n *Nonce) Unlock() {
-// 	n.mux.Unlock()
-// }
-
-// // Inc increments the counter for the given key.
-// func (n *Nonce) Inc(key string) int {
-// 	if concurrency {
-// 		n.mux.Lock()
-// 		defer n.mux.Unlock()
-// 	}
-// 	n.value[key]++
-// 	// Lock so only one goroutine at a time can access the map c.v.
-// 	return n.value[key]
-// }
-
-// hard-code for test only
+// hard-code for testing only
 const peerAddress = "peer0.org1.example.com:7051"
 const ordererAddress = "orderer.example.com:7050"
 const peerMSPID = "Org1MSP"
@@ -130,11 +106,9 @@ var submitChannel = make(chan SignedProposalWrapper)
 var deliverClients = []pb.DeliverClient{}
 
 /*
-	mapping txid and a channel - which let the invokeHandler know that the transaction is submitted
+	mapping txid and a channel - which help the invokeHandler know that the transaction is submitted
 */
 var responseChannelMap = cmap.New()
-
-// var nonce Nonce
 
 func main() {
 	if len(os.Args) < 2 {
@@ -638,15 +612,6 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// accountId := proposeRequest.Args[0]
-
-	// if !concurrency {
-	// 	nonce.Lock()
-	// }
-
-	// currentNonceInt := nonce.Inc(accountId)
-	// proposeRequest.Nonce = currentNonceInt
-
 	responseChan := make(chan ProposalResponse)
 	fmt.Println(proposeRequest)
 
@@ -662,11 +627,6 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	// send proposal to proposer
 	invokeChannel <- proposalWrapper
 	proposalResponse = <-responseChan
-
-	// if !concurrency {
-	// 	nonce.Unlock()
-	// }
-
 	proposalResp := proposalResponse.Content[0]
 
 	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
@@ -675,7 +635,6 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	}
 
 	if proposalResponse.Error != nil {
-		// nonce.Unlock()
 		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -683,15 +642,15 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	//
 	// =========================== SUBMIT PHASE ===========================
 
-	submitErr := sendToSubmitter(proposalResponse)
+	// submitErr := sendToSubmitter(proposalResponse)
 
-	if submitErr != nil {
-		// http.Error(res, submitErr.Error(), http.StatusInternalServerError)
-		fmt.Println("submit Error ", submitErr)
-		return
-	}
+	// if submitErr != nil {
+	// 	http.Error(res, submitErr.Error(), http.StatusInternalServerError)
+	// 	fmt.Println("submit Error ", submitErr)
+	// 	return
+	// }
 
-	fmt.Println(string(proposalResponse.Content[0].Response.Payload))
+	// fmt.Println(string(proposalResponse.Content[0].Response.Payload))
 	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
 	return
 }
@@ -702,6 +661,7 @@ func queryHandler(res http.ResponseWriter, req *http.Request) {
 
 	if err != nil {
 		http.Error(res, "can't read body", http.StatusBadRequest)
+		return
 	}
 
 	responseChan := make(chan ProposalResponse)
@@ -721,9 +681,6 @@ func queryHandler(res http.ResponseWriter, req *http.Request) {
 	proposalResponse = <-responseChan
 
 	proposalResp := proposalResponse.Content[0]
-
-	fmt.Println(string(proposalResp.Response.Payload))
-	fmt.Println(string(proposalResp.Response.Message))
 
 	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
 		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
@@ -765,40 +722,30 @@ func packArgs(proposeRequest *ProposeRequest, isWithNonce bool) [][]byte {
 	return args
 }
 
-func queryHandler(res http.ResponseWriter, req *http.Request) {
-	// =========================== PROPOSE PHASE ===========================
-	proposeRequest, err := resolveHttpRequest(req)
-
-	if err != nil {
-		http.Error(res, "can't read body", http.StatusBadRequest)
+func NewDeliverGroup(
+	deliverClients []pb.DeliverClient,
+	peerAddresses []string,
+	signer identity.SignerSerializer,
+	certificate tls.Certificate,
+	channelID string,
+	txid string,
+) *chaincode.DeliverGroup {
+	clients := make([]*chaincode.DeliverClient, len(deliverClients))
+	for i, client := range deliverClients {
+		dc := &chaincode.DeliverClient{
+			Client:  client,
+			Address: peerAddresses[i],
+		}
+		clients[i] = dc
 	}
 
-	responseChan := make(chan ProposalResponse)
-	fmt.Println(proposeRequest)
-
-	args := packArgs(proposeRequest, false)
-
-	proposalWrapper := ProposalWrapper{
-		RequestArgs:             args,
-		proposalResponseChannel: responseChan,
+	dg := &chaincode.DeliverGroup{
+		Clients:     clients,
+		Certificate: certificate,
+		ChannelID:   channelID,
+		TxID:        txid,
+		Signer:      signer,
 	}
 
-	var proposalResponse ProposalResponse
-
-	// send proposal to proposer
-	invokeChannel <- proposalWrapper // may change to query channel, if needed!
-	proposalResponse = <-responseChan
-
-	proposalResp := proposalResponse.Content[0]
-
-	fmt.Println(string(proposalResp.Response.Payload))
-	fmt.Println(string(proposalResp.Response.Message))
-
-	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
-		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
-		return
-	}
-
-	fmt.Fprint(res, string(proposalResp.Response.Payload))
-	return
+	return dg
 }

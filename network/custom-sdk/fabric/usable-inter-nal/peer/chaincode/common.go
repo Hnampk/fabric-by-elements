@@ -836,7 +836,7 @@ func (dg *DeliverGroup) Listen(ctx context.Context, txIdChannel chan *pb.Filtere
 	dg.wg.Add(len(dg.Clients))
 	errChan := make(chan string)
 	for _, client := range dg.Clients {
-		go dg.ClientListen(client, txIDChannel, errChan)
+		go dg.ClientListen(client, txIdChannel, errChan)
 	}
 	readyCh := make(chan struct{})
 	go dg.WaitForWG(readyCh)

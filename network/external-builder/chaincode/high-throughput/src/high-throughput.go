@@ -60,7 +60,7 @@ func (w *InternalWorldState) Deposit(key string, value float64) error {
 	return nil
 }
 
-func (w *InternalWorldState) WithDraw(key string, value float64) error {
+func (w *InternalWorldState) Withdraw(key string, value float64) error {
 	w.value[key] -= value
 
 	return nil
@@ -104,6 +104,8 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) pb.Response 
 	// Route to the appropriate handler function to interact with the ledger appropriately
 	if function == "update" {
 		return s.update(APIstub, args)
+	} else if function == "transfer" {
+		return s.transfer(APIstub, args)
 	} else if function == "get" {
 		return s.get(APIstub, args)
 	} else if function == "prune" {
@@ -133,16 +135,19 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) pb.Response 
  *
  * @param APIstub The chaincode shim
  * @param args The arguments array for the update invocation
+ * @param helpUpdateInternalWS give something into this slice will stop update Internal world state
  *
  * @return A response structure indicating success or failure with a message
  */
 
 var temp = 1
 
-func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
+func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []string, helpUpdateInternalWS ...bool) pb.Response {
+	var err error
+
 	// Check we have a valid number of args
-	if len(args) != 4 {
-		return shim.Error("Incorrect number of arguments, expecting 4, got " + strconv.Itoa(len(args)))
+	if len(args) != 3 {
+		return shim.Error("Incorrect number of arguments, expecting 3, got " + strconv.Itoa(len(args)))
 	}
 
 	// Extract the args
@@ -151,12 +156,6 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 	valueFloat, err := strconv.ParseFloat(args[1], 64)
 	if err != nil {
 		return shim.Error("Provided value was not a number")
-	}
-
-	valueFloat, err := strconv.ParseFloat(value, 64)
-
-	if err != nil {
-		return shim.Error(fmt.Sprintf("Invalid input value %s", value))
 	}
 
 	// Make sure a valid operator is provided
@@ -169,34 +168,14 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 	internalWorldState.Lock()
 	defer internalWorldState.Unlock()
 
-	balance, err := internalWorldState.GetAccountBalance(account)
-
-	if err != nil {
-		fmt.Println("[ERROR] missing internal World state")
-		//
-		var getResponse pb.Response
-		getResponse = s.get(APIstub, []string{account})
-
-		if getResponse.Status >= shim.ERRORTHRESHOLD {
-			fmt.Println("getResponse ERROR")
-			// new account
-			balance = 0
-		} else {
-			balance, err = strconv.ParseFloat(string(getResponse.Payload), 64)
-			internalWorldState.updateAccountBalance(account, balance)
-
-			if err != nil {
-				return shim.Error(fmt.Sprintf("getResponse.Payload is not float number??? %s", err.Error()))
-			}
-		}
+	if op == "-" {
+		err = s.fetchAccountBalance(APIstub, account, true, valueFloat)
+	} else {
+		err = s.fetchAccountBalance(APIstub, account, false, -1)
 	}
 
-	fmt.Println("balance", balance)
-
-	if op == "-" {
-		if balance-valueFloat < 0 {
-			return shim.Error(fmt.Sprintf("Invalid account balance %f", balance))
-		}
+	if err != nil {
+		return shim.Error(err.Error())
 	}
 
 	// ===== END VALIDATION =====
@@ -217,14 +196,13 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 		return shim.Error(fmt.Sprintf("Could not put operation for %s in the ledger: %s", account, compositePutErr.Error()))
 	}
 
-	newBalance := balance
-	switch {
-	case op == "+":
-		internalWorldState.Deposit(account, valueFloat)
-		newBalance += valueFloat
-	case op == "-":
-		internalWorldState.WithDraw(account, valueFloat)
-		newBalance -= valueFloat
+	if len(helpUpdateInternalWS) == 0 {
+		switch {
+		case op == "+":
+			internalWorldState.Deposit(account, valueFloat)
+		case op == "-":
+			internalWorldState.Withdraw(account, valueFloat)
+		}
 	}
 
 	// eventErr := APIstub.SetEvent("updateEvent", []byte("event-hello"))
@@ -232,12 +210,39 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 	// 	return shim.Error(fmt.Sprintf("Failed to emit event"))
 	// }
 
-	return shim.Success([]byte(fmt.Sprintf("Successfully added %s%s to %s, new balance: %f", op, args[1], account, newBalance)))
+	return shim.Success([]byte(fmt.Sprintf("Successfully added %s%s to %s", op, args[1], account)))
 }
 
-// func validateAccountBalance(account string, value float64) bool {
+func (s *SmartContract) fetchAccountBalance(APIstub shim.ChaincodeStubInterface, account string, needValidate bool, valueFloat float64) error {
+	balance, err := internalWorldState.GetAccountBalance(account)
 
-// }
+	if err != nil {
+		fmt.Println("[fetchAccountBalance] missing internal World state")
+		//
+		var getResponse pb.Response
+		getResponse = s.get(APIstub, []string{account})
+
+		if getResponse.Status >= shim.ERRORTHRESHOLD {
+			// new account
+			balance = 0
+		} else {
+			balance, err = strconv.ParseFloat(string(getResponse.Payload), 64)
+			internalWorldState.updateAccountBalance(account, balance)
+
+			if err != nil {
+				return errors.Errorf("getResponse.Payload is not float number??? %s", err.Error())
+			}
+		}
+	}
+
+	fmt.Println("balance", balance)
+
+	if needValidate && balance-valueFloat < 0 {
+		return errors.Errorf("Invalid account %s's balance: %f", account, balance)
+	}
+
+	return nil
+}
 
 /**
  * transfer
@@ -252,28 +257,49 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
  *
  * @return A response structure indicating success or failure with a message
  */
-// func (s *SmartContract) transfer(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
-// 	// Check we have a valid number of args
-// 	if len(args) != 3 {
-// 		return shim.Error("Incorrect number of arguments, expecting 3")
-// 	}
+func (s *SmartContract) transfer(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
+	// Check we have a valid number of args
+	if len(args) != 3 {
+		return shim.Error("Incorrect number of arguments, expecting 3")
+	}
 
-// 	// Extract the args
-// 	source := args[0]
-// 	dest := args[2]
-// 	valueFloat, err := strconv.ParseFloat(args[1], 64)
-// 	if err != nil {
-// 		return shim.Error("Provided value was not a number")
-// 	}
+	// Extract the args
+	sourceAccount := args[0]
+	destinationAccount := args[1]
+	value := args[2]
+	valueFloat, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return shim.Error("Provided value was not a number")
+	}
 
-// 	// ===== START VALIDATION =====
+	if valueFloat < 0 {
+		return shim.Error(fmt.Sprintf("Negative value: %s", value))
+	}
 
-// 	// validate source account's balance
+	// ===== START VALIDATION & TRANSFER =====
 
-// 	// ===== END VALIDATION =====
+	senderUpdate := s.update(APIstub, []string{sourceAccount, value, "-"})
 
-// 	return shim.Success([]byte(fmt.Sprintf("Successfully added %s%s to %s, new balance: %f")))
-// }
+	if senderUpdate.Status > shim.ERRORTHRESHOLD {
+		return senderUpdate
+	}
+
+	receiverUpdate := s.update(APIstub, []string{destinationAccount, value, "+"})
+
+	if receiverUpdate.Status > shim.ERRORTHRESHOLD {
+		internalWorldState.Lock()
+		defer internalWorldState.Unlock()
+
+		// refund for source account
+		internalWorldState.Deposit(sourceAccount, valueFloat)
+
+		return receiverUpdate
+	}
+
+	// ===== END VALIDATION & TRANSFER =====
+
+	return shim.Success([]byte(fmt.Sprintf("Successfully transfer %s from %s to %s", value, sourceAccount, destinationAccount)))
+}
 
 /**
  * Retrieves the aggregate value of a variable in the ledger. Gets all delta rows for the variable
