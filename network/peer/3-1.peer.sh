@@ -7,8 +7,8 @@ export FABRIC_CFG_PATH=${PWD}/../
 # bridge network as the peers
 # https://docs.docker.com/compose/networking/
 # export CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=my_fabric_test
-export FABRIC_LOGGING_SPEC=INFO
-#export FABRIC_LOGGING_SPEC=DEBUG
+#export FABRIC_LOGGING_SPEC=INFO
+export FABRIC_LOGGING_SPEC=DEBUG
 export CORE_PEER_TLS_ENABLED=false
 #export CORE_PEER_TLS_ENABLED=true
 export CORE_PEER_PROFILE_ENABLED=true

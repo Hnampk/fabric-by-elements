@@ -89,11 +89,12 @@ const peerAddress = "peer0.org1.example.com:7051"
 const ordererAddress = "orderer.example.com:7050"
 const peerMSPID = "Org1MSP"
 const chaincodeLang = "GOLANG"
-const channelID = "vnpay-channel"
 
+var channelID = "vnpay-channel"
 var rootURL = "/home/ewallet/network/"
 var signerConfig signerLib.Config
 var chaincodeName = "mycc1"
+var port = "8090"
 
 var waitForEvent = false
 
@@ -112,44 +113,53 @@ var responseChannelMap = cmap.New()
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Please enter the Number of connections")
-		return
-	}
-
-	if len(os.Args) < 3 {
-		fmt.Println("Please enter chaincode name")
-		return
-	}
-
-	if len(os.Args) < 4 {
 		fmt.Println("Please enter {0: nampkh, 1: server test}")
 		return
 	}
 
-	var err error
-	workerNum, err = strconv.Atoi(os.Args[1])
-	if err != nil {
-		fmt.Println("An error occurred: ", err)
+	if len(os.Args) < 3 {
+		fmt.Println("Please enter port (ex: 8090)")
 		return
 	}
 
-	chaincodeName = os.Args[2]
-
-	if os.Args[3] == "0" {
-		rootURL = "/home/nampkh/nampkh/my-fabric/network/"
+	if len(os.Args) < 4 {
+		fmt.Println("Please enter channel name")
+		return
 	}
 
+	if len(os.Args) < 5 {
+		fmt.Println("Please enter chaincode name")
+		return
+	}
+
+	if len(os.Args) < 6 {
+		fmt.Println("Please enter the Number of connections")
+		return
+	}
+
+	if os.Args[1] == "0" {
+		rootURL = "/home/nampkh/nampkh/my-fabric/network/"
+	}
 	signerConfig = signerLib.Config{
 		MSPID:        peerMSPID,
 		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
 		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
 	}
 
+	port = os.Args[2]
+	channelID = os.Args[3]
+	chaincodeName = os.Args[4]
+
+	var err error
+	workerNum, err = strconv.Atoi(os.Args[5])
+	if err != nil {
+		fmt.Println("An error occurred: ", err)
+		return
+	}
+
 	initProposerPool(workerNum)
 	err = initSubmitterPool(workerNum)
 	initListenerPool(1)
-
-	// nonce = Nonce{value: make(map[string]int)}
 
 	if err != nil {
 		fmt.Println("An error occurred while initSubmitterPool: ", err)
@@ -159,9 +169,9 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/invoke", invokeHandler)
+	mux.HandleFunc("/invoke-only", invokeOnlyHandler)
 	mux.HandleFunc("/query", queryHandler)
 	// listen and serve
-	port := "8090"
 	fmt.Println("Server listen on port", port)
 	http.ListenAndServe(":"+port, mux)
 }
@@ -642,16 +652,57 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	//
 	// =========================== SUBMIT PHASE ===========================
 
-	// submitErr := sendToSubmitter(proposalResponse)
+	submitErr := sendToSubmitter(proposalResponse)
 
-	// if submitErr != nil {
-	// 	http.Error(res, submitErr.Error(), http.StatusInternalServerError)
-	// 	fmt.Println("submit Error ", submitErr)
-	// 	return
-	// }
+	if submitErr != nil {
+		http.Error(res, submitErr.Error(), http.StatusInternalServerError)
+		fmt.Println("submit Error ", submitErr)
+		return
+	}
 
 	// fmt.Println(string(proposalResponse.Content[0].Response.Payload))
 	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
+	return
+}
+
+func invokeOnlyHandler(res http.ResponseWriter, req *http.Request) {
+	// =========================== PROPOSE PHASE ===========================
+	proposeRequest, err := resolveHttpRequest(req)
+
+	if err != nil {
+		http.Error(res, "can't read body", http.StatusBadRequest)
+		return
+	}
+
+	responseChan := make(chan ProposalResponse)
+	fmt.Println(proposeRequest)
+
+	args := packArgs(proposeRequest, false)
+
+	proposalWrapper := ProposalWrapper{
+		RequestArgs:             args,
+		proposalResponseChannel: responseChan,
+	}
+
+	var proposalResponse ProposalResponse
+
+	// send proposal to proposer
+	invokeChannel <- proposalWrapper
+	proposalResponse = <-responseChan
+	proposalResp := proposalResponse.Content[0]
+
+	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
+		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
+		return
+	}
+
+	if proposalResponse.Error != nil {
+		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// fmt.Println(string(proposalResponse.Content[0].Response.Payload))
+	fmt.Fprint(res, "proposed, txid: "+proposalResponse.TxID)
 	return
 }
 
