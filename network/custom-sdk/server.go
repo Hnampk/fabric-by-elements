@@ -37,8 +37,8 @@ type Proposer struct {
 }
 
 type ProposalWrapper struct {
-	RequestArgs             [][]byte
-	proposalResponseChannel chan ProposalResponse
+	RequestArgs       [][]byte
+	responseChannelId string
 }
 
 type ProposeRequest struct {
@@ -110,6 +110,23 @@ var deliverClients = []pb.DeliverClient{}
 	mapping txid and a channel - which help the invokeHandler know that the transaction is submitted
 */
 var responseChannelMap = cmap.New()
+var proposalResponseChannelMap = cmap.New()
+
+type ProposalResponseChannelID struct {
+	id int
+
+	mutex sync.Mutex
+}
+
+func (c *ProposalResponseChannelID) Inc() int {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.id++
+
+	return c.id
+}
+
+var proposalResponseChannelID = ProposalResponseChannelID{}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -221,14 +238,24 @@ func (p *Proposer) start() {
 	for wrapper := range p.requestChannel {
 		// when receive a proposal, forward it to peer (propose)
 
-		response, err := p.propose(wrapper.RequestArgs)
+		go func(wrapper ProposalWrapper) {
+			response, err := p.propose(wrapper.RequestArgs)
 
-		if err != nil {
-			wrapper.proposalResponseChannel <- ProposalResponse{Error: err}
-			continue
-		}
+			if tmp, ok := proposalResponseChannelMap.Get(wrapper.responseChannelId); ok {
+				proposalResponseChannel := tmp.(chan ProposalResponse)
 
-		wrapper.proposalResponseChannel <- *response
+				if err != nil {
+					proposalResponseChannel <- ProposalResponse{Error: err}
+					return
+				}
+
+				proposalResponseChannel <- *response
+			} else {
+				fmt.Println("Channel", wrapper.responseChannelId, "does not exist!")
+			}
+
+		}(wrapper)
+
 	}
 }
 
@@ -483,8 +510,8 @@ func (s *Submitter) start() {
 					return
 				}
 			}
-
 			// wrapper.errorChannel <- errors.Errorf("DONE")
+
 		}(wrapper)
 		// free the Submitter after submit tx to orderer
 	}
@@ -622,16 +649,17 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	responseChan := make(chan ProposalResponse)
-	fmt.Println(proposeRequest)
-
 	args := packArgs(proposeRequest, false)
 
-	proposalWrapper := ProposalWrapper{
-		RequestArgs:             args,
-		proposalResponseChannel: responseChan,
-	}
+	responseChan := make(chan ProposalResponse)
+	id := strconv.Itoa(proposalResponseChannelID.Inc())
+	proposalResponseChannelMap.Set(id, responseChan)
+	defer proposalResponseChannelMap.Remove(id)
 
+	proposalWrapper := ProposalWrapper{
+		RequestArgs:       args,
+		responseChannelId: id,
+	}
 	var proposalResponse ProposalResponse
 
 	// send proposal to proposer
@@ -674,17 +702,20 @@ func invokeOnlyHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	responseChan := make(chan ProposalResponse)
 	fmt.Println(proposeRequest)
 
 	args := packArgs(proposeRequest, false)
 
-	proposalWrapper := ProposalWrapper{
-		RequestArgs:             args,
-		proposalResponseChannel: responseChan,
-	}
-
 	var proposalResponse ProposalResponse
+	responseChan := make(chan ProposalResponse)
+	id := strconv.Itoa(proposalResponseChannelID.Inc())
+	proposalResponseChannelMap.Set(id, responseChan)
+	defer proposalResponseChannelMap.Remove(id)
+
+	proposalWrapper := ProposalWrapper{
+		RequestArgs:       args,
+		responseChannelId: id,
+	}
 
 	// send proposal to proposer
 	invokeChannel <- proposalWrapper
@@ -715,17 +746,20 @@ func queryHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	responseChan := make(chan ProposalResponse)
 	fmt.Println(proposeRequest)
 
 	args := packArgs(proposeRequest, false)
 
-	proposalWrapper := ProposalWrapper{
-		RequestArgs:             args,
-		proposalResponseChannel: responseChan,
-	}
-
 	var proposalResponse ProposalResponse
+	responseChan := make(chan ProposalResponse)
+	id := strconv.Itoa(proposalResponseChannelID.Inc())
+	proposalResponseChannelMap.Set(id, responseChan)
+	defer proposalResponseChannelMap.Remove(id)
+
+	proposalWrapper := ProposalWrapper{
+		RequestArgs:       args,
+		responseChannelId: id,
+	}
 
 	// send proposal to proposer
 	invokeChannel <- proposalWrapper // may change to query channel, if needed!

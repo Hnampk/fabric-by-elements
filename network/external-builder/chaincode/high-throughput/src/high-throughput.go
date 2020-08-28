@@ -31,10 +31,14 @@ import (
 	"strconv"
 	"sync"
 
+	// shim "../../../fabric-chaincode-go/shim"
+
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pb "github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/pkg/errors"
+
 	// "google.golang.org/protobuf/internal/errors"
+	"github.com/snowzach/protosmart"
 )
 
 //SmartContract is the data structure which represents this contract and on which  various contract lifecycle functions are attached
@@ -544,6 +548,7 @@ func main() {
 		},
 	}
 
+	protosmart.OverrideCodec("proto")
 	fmt.Println("Start Chaincode server on " + address)
 	err := server.Start()
 	if err != nil {
