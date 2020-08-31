@@ -263,7 +263,7 @@ func (p *Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 	signer, err := signerLib.NewSigner(signerConfig)
 
 	if err != nil {
-		fmt.Println("[ERROR]propose: NewSigner:", err)
+		// fmt.Println("[ERROR]propose: NewSigner:", err)
 		return nil, err
 	}
 
@@ -283,7 +283,7 @@ func (p *Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 
 	creator, err := signer.Serialize()
 	if err != nil {
-		fmt.Println("[ERROR] propose: Serialize:", err)
+		// fmt.Println("[ERROR] propose: Serialize:", err)
 		return nil, err
 	}
 
@@ -295,19 +295,19 @@ func (p *Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 
 	prop, txID, err := protoutil.CreateChaincodeProposalWithTxIDAndTransient(pcommon.HeaderType_ENDORSER_TRANSACTION, channelID, invocation, creator, txID, tMap)
 	if err != nil {
-		fmt.Println("[ERROR] propose: CreateChaincodeProposalWithTxIDAndTransient:", err)
+		// fmt.Println("[ERROR] propose: CreateChaincodeProposalWithTxIDAndTransient:", err)
 		return nil, err
 	}
 
 	signedProp, err := protoutil.GetSignedProposal(prop, signer)
 	if err != nil {
-		fmt.Println("[ERROR] propose: GetSignedProposal:", err)
+		// fmt.Println("[ERROR] propose: GetSignedProposal:", err)
 		return nil, err
 	}
 
 	responses, err := processProposals(p.EndorserClients, *signedProp)
 	if err != nil || len(responses) < 1 {
-		fmt.Println("[ERROR] propose: processProposals:", err)
+		// fmt.Println("[ERROR] propose: processProposals:", err)
 		return nil, err
 	}
 
@@ -665,15 +665,14 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	// send proposal to proposer
 	invokeChannel <- proposalWrapper
 	proposalResponse = <-responseChan
-	proposalResp := proposalResponse.Content[0]
-
-	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
-		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
+	if proposalResponse.Error != nil {
+		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if proposalResponse.Error != nil {
-		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
+	proposalResp := proposalResponse.Content[0]
+	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
+		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
 		return
 	}
 
@@ -720,15 +719,14 @@ func invokeOnlyHandler(res http.ResponseWriter, req *http.Request) {
 	// send proposal to proposer
 	invokeChannel <- proposalWrapper
 	proposalResponse = <-responseChan
-	proposalResp := proposalResponse.Content[0]
-
-	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
-		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
+	if proposalResponse.Error != nil {
+		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if proposalResponse.Error != nil {
-		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
+	proposalResp := proposalResponse.Content[0]
+	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
+		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
 		return
 	}
 
@@ -764,9 +762,12 @@ func queryHandler(res http.ResponseWriter, req *http.Request) {
 	// send proposal to proposer
 	invokeChannel <- proposalWrapper // may change to query channel, if needed!
 	proposalResponse = <-responseChan
+	if proposalResponse.Error != nil {
+		http.Error(res, proposalResponse.Error.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	proposalResp := proposalResponse.Content[0]
-
 	if proposalResp.Response.Status >= shim.ERRORTHRESHOLD {
 		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
 		return
