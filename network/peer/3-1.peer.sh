@@ -26,5 +26,5 @@ export CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051
 export CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org1.example.com:7051
 export CORE_PEER_LOCALMSPID=Org1MSP
 
-#../../bin/peer node start
-../../bin/main node start
+../../bin/peer node start
+#../../bin/main node start

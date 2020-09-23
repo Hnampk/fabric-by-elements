@@ -12,6 +12,10 @@ sleep 2
 set -x
 ../../bin/cryptogen generate --config=./crypto-config-org1.yaml
 res=$?
+../../bin/cryptogen generate --config=./crypto-config-org2.yaml
+res=$?
+../../bin/cryptogen generate --config=./crypto-config-org3.yaml
+res=$?
 set +x
 
 if [ $res -ne 0 ]; then

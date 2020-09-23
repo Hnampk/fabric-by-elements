@@ -33,6 +33,7 @@ import (
 
 	pb "example.com/grpc-fabric-test/helloworld"
 	cmap "github.com/orcaman/concurrent-map"
+	"github.com/pkg/errors"
 
 	"google.golang.org/grpc"
 )
@@ -79,6 +80,7 @@ func (c *requestID) Inc() int {
 	Unary grpc
 */
 func hi(ctx context.Context, client pb.GreeterClient, request GreetingRequest) (string, error) {
+	return "", errors.Errorf("")
 	// Contact the server and print out its response.
 	response, err := client.SayHello(ctx, &pb.HelloRequest{Name: request.Name, Language: request.Language})
 
@@ -125,28 +127,30 @@ func createPool(id int) {
 
 	func() {
 		for req := range requestChan {
-			ctx := context.Background()
+			go func(req HiRequest) {
+				ctx := context.Background()
 
-			greeting, err := hi(ctx, client, req.req)
+				greeting, err := hi(ctx, client, req.req)
 
-			fmt.Println(greeting)
+				fmt.Println(greeting)
 
-			if tmp, ok := responseChanMap.Get(req.ID); ok {
-				responseMap := tmp.(chan string)
-				responseChanMap.Remove(req.ID)
+				if tmp, ok := responseChanMap.Get(req.ID); ok {
+					responseMap := tmp.(chan string)
+					responseChanMap.Remove(req.ID)
 
-				if err != nil {
-					log.Fatalf("Error occured", err.Error(), http.StatusInternalServerError)
-					fmt.Println("ERROR", err)
-					responseMap <- ""
+					if err != nil {
+						// log.Fatalf("Error occured", err.Error(), http.StatusInternalServerError)
+						// fmt.Println("ERROR", err)
+						responseMap <- ""
 
-					continue
+						return
+					}
+
+					responseMap <- greeting
+				} else {
+					fmt.Println("Response channel not found, id: ", req.ID)
 				}
-
-				responseMap <- greeting
-			} else {
-				fmt.Println("Response channel not found, id: ", req.ID)
-			}
+			}(req)
 
 		}
 	}()

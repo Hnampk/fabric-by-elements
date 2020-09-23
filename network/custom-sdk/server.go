@@ -16,6 +16,7 @@ import (
 	"example.com/custom-sdk/fabric/usable-inter-nal/peer/common"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/comm"
 	"example.com/custom-sdk/fabric/usable-inter-nal/pkg/identity"
+	redis "github.com/go-redis/redis/v8"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pcommon "github.com/hyperledger/fabric-protos-go/common"
 
@@ -30,10 +31,14 @@ import (
 )
 
 type Proposer struct {
-	Id              int
-	EndorserClients []pb.EndorserClient
-	clientConn      *grpc.ClientConn
-	requestChannel  chan ProposalWrapper
+	Id                 int
+	EndorserClients    []pb.EndorserClient
+	clientConn         *grpc.ClientConn
+	requestChannel     chan ProposalWrapper
+	tartgetPeerAddress string // merge this
+	peerMSPID          string // merge this
+	org                string // merge this
+
 }
 
 type ProposalWrapper struct {
@@ -85,26 +90,40 @@ type EventResponse struct {
 }
 
 // hard-code for testing only
-const peerAddress = "peer0.org1.example.com:7051"
+var peerAddress = ""
+
 const ordererAddress = "orderer.example.com:7050"
-const peerMSPID = "Org1MSP"
-const chaincodeLang = "GOLANG"
 
-var channelID = "vnpay-channel"
-var rootURL = "/home/ewallet/network/"
-var signerConfig signerLib.Config
-var chaincodeName = "mycc1"
-var port = "8090"
+var peerMSPID = "Org3MSP"
 
-var waitForEvent = false
+// Define Status codes for the response
+const (
+	OK                    = 200
+	ERROR                 = 500
+	chaincodeLang         = "GOLANG"
+	REDIS_HOST            = "172.16.79.8"
+	REDIS_PORT            = "6379"
+	RDB_TXSTATUS_WAITING  = "0"
+	RDB_TXSTATUS_SUCCESS  = "1"
+	RDB_TXSTATUS_FAILED   = "2"
+	REDIS_API_PUBSUB_CHAN = "api-chaincode-channel"
+)
 
-var deliverPeerAddress = []string{"peer0.org1.example.com:7051"}
-
-var workerNum = 10
-var invokeChannel = make(chan ProposalWrapper)
-var queryChannel = make(chan ProposalWrapper)
-var submitChannel = make(chan SignedProposalWrapper)
-var deliverClients = []pb.DeliverClient{}
+var (
+	rdb                *redis.Client
+	channelID          = "vnpay-channel"
+	rootURL            = "/home/ewallet/network/"
+	signerConfig       signerLib.Config
+	chaincodeName      = "mycc1"
+	port               = "8090"
+	waitForEvent       = false
+	deliverPeerAddress = []string{"peer0.org1.example.com:7051"}
+	workerNum          = 10
+	invokeChannel      = make(chan ProposalWrapper)
+	queryChannel       = make(chan ProposalWrapper)
+	submitChannel      = make(chan SignedProposalWrapper)
+	deliverClients     = []pb.DeliverClient{}
+)
 
 /*
 	mapping txid and a channel - which help the invokeHandler know that the transaction is submitted
@@ -159,8 +178,8 @@ func main() {
 	}
 	signerConfig = signerLib.Config{
 		MSPID:        peerMSPID,
-		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
-		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
+		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org3.example.com/users/Admin@org3.example.com/msp/signcerts/Admin@org3.example.com-cert.pem",
+		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org3.example.com/users/Admin@org3.example.com/msp/keystore/priv_sk",
 	}
 
 	port = os.Args[2]
@@ -183,11 +202,19 @@ func main() {
 		return
 	}
 
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     REDIS_HOST + ":" + REDIS_PORT,
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/invoke", invokeHandler)
 	mux.HandleFunc("/invoke-only", invokeOnlyHandler)
 	mux.HandleFunc("/query", queryHandler)
+	mux.HandleFunc("/submit", submitHandler)
+	mux.HandleFunc("/length", lengthHandler)
 	// listen and serve
 	fmt.Println("Server listen on port", port)
 	http.ListenAndServe(":"+port, mux)
@@ -195,7 +222,31 @@ func main() {
 
 func initProposerPool(poolSize int) {
 	for i := 0; i < poolSize; i++ {
-		proposer, err := initProposer(i, peerAddress)
+		var org string
+
+		if i%poolSize == 0 {
+			peerAddress = "peer0.org1.example.com:7051"
+			peerMSPID = "Org1MSP"
+			org = "org1.example.com"
+		} else if i%poolSize == 1 {
+			peerAddress = "peer0.org2.example.com:7051"
+			peerMSPID = "Org2MSP"
+			org = "org2.example.com"
+		} else if i%poolSize == 2 {
+			peerAddress = "peer0.org3.example.com:7051"
+			peerMSPID = "Org3MSP"
+			org = "org3.example.com"
+		} else if i%poolSize == 3 {
+			peerAddress = "peer0.org4.example.com:7051"
+			peerMSPID = "Org4MSP"
+			org = "org4.example.com"
+		} else {
+			peerAddress = "peer0.org5.example.com:7051"
+			peerMSPID = "Org5MSP"
+			org = "org5.example.com"
+		}
+
+		proposer, err := initProposer(i, peerAddress, peerMSPID, org)
 
 		if err != nil {
 			fmt.Println("[ERROR]initProposerPool:", err)
@@ -208,7 +259,7 @@ func initProposerPool(poolSize int) {
 	}
 }
 
-func initProposer(id int, tartgetPeerAddress string) (*Proposer, error) {
+func initProposer(id int, tartgetPeerAddress string, peerMSPID string, org string) (*Proposer, error) {
 	cc, err := grpc.Dial(tartgetPeerAddress, grpc.WithInsecure()) // Without TLS, for test only
 
 	if err != nil {
@@ -222,9 +273,12 @@ func initProposer(id int, tartgetPeerAddress string) (*Proposer, error) {
 	fmt.Println("[Custom-SDK] Proposer started:", id)
 
 	return &Proposer{
-		Id:              id,
-		EndorserClients: endorserClients,
-		clientConn:      cc,
+		Id:                 id,
+		EndorserClients:    endorserClients,
+		clientConn:         cc,
+		tartgetPeerAddress: tartgetPeerAddress,
+		peerMSPID:          peerMSPID,
+		org:                org,
 	}, nil
 }
 
@@ -260,6 +314,13 @@ func (p *Proposer) start() {
 }
 
 func (p *Proposer) propose(args [][]byte) (*ProposalResponse, error) {
+
+	var signerConfig = signerLib.Config{
+		MSPID:        p.peerMSPID,
+		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/signcerts/Admin@" + p.org + "-cert.pem",
+		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/keystore/priv_sk",
+	}
+
 	signer, err := signerLib.NewSigner(signerConfig)
 
 	if err != nil {
@@ -582,7 +643,8 @@ func createDeliverGroup(ctx context.Context, txID string) (*chaincode.DeliverGro
 
 	dg = NewDeliverGroup(
 		deliverClients,
-		[]string{peerAddress},
+		// []string{peerAddress},
+		[]string{"peer0.org1.example.com", "peer0.org2.example.com", "peer0.org3.example.com", "peer0.org4.example.com", "peer0.org5.example.com"},
 		signer,
 		certificate,
 		channelID,
@@ -640,6 +702,11 @@ func onReceiveSubmissionEvent(tx *pb.FilteredTransaction) {
 	}
 }
 
+type SuccessMessage struct {
+	Message string
+	Nonces  []string
+}
+
 func invokeHandler(res http.ResponseWriter, req *http.Request) {
 	// =========================== PROPOSE PHASE ===========================
 	proposeRequest, err := resolveHttpRequest(req)
@@ -675,22 +742,63 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
 		return
 	}
+	var response SuccessMessage
+	err = json.Unmarshal(proposalResponse.Content[0].Response.Payload, &response)
+	if err != nil {
+		fmt.Println("failed to unmarshal payload")
+		return
+	}
+
+	// fmt.Println(response.Message)
 
 	//
 	// =========================== SUBMIT PHASE ===========================
 
 	submitErr := sendToSubmitter(proposalResponse)
 
+	var ctx = context.Background()
+
 	if submitErr != nil {
 		http.Error(res, submitErr.Error(), http.StatusInternalServerError)
+		// Publish a message.
+		// payload, _ := json.Marshal(SuccessMessage{Nonce: response.Nonce, Message: RDB_TXSTATUS_FAILED})
+		go rdb.Publish(ctx, REDIS_API_PUBSUB_CHAN, SuccessMessage{Nonces: response.Nonces, Message: RDB_TXSTATUS_FAILED})
+
 		fmt.Println("submit Error ", submitErr)
 		return
 	}
 
-	// fmt.Println(string(proposalResponse.Content[0].Response.Payload))
+	payload, _ := json.Marshal(SuccessMessage{Nonces: response.Nonces, Message: RDB_TXSTATUS_SUCCESS})
+	go rdb.Publish(ctx, REDIS_API_PUBSUB_CHAN, payload)
+
 	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
 	return
 }
+
+type Mylist struct {
+	proposalResponses []ProposalResponse
+
+	mux sync.Mutex
+}
+
+func (m *Mylist) push(proposalResponse ProposalResponse) {
+	// m.mux.Lock()
+	// defer m.mux.Unlock()
+
+	m.proposalResponses = append(m.proposalResponses, proposalResponse)
+}
+
+func (m *Mylist) get() ProposalResponse {
+	m.mux.Lock()
+	defer m.mux.Unlock()
+
+	proposalResponse := m.proposalResponses[0]
+	m.proposalResponses = m.proposalResponses[1:]
+
+	return proposalResponse
+}
+
+var proposalResponses = Mylist{}
 
 func invokeOnlyHandler(res http.ResponseWriter, req *http.Request) {
 	// =========================== PROPOSE PHASE ===========================
@@ -730,8 +838,32 @@ func invokeOnlyHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// save signed proposal
+	// proposalResponses.push(proposalResponse)
+
 	// fmt.Println(string(proposalResponse.Content[0].Response.Payload))
 	fmt.Fprint(res, "proposed, txid: "+proposalResponse.TxID)
+	return
+}
+
+func submitHandler(res http.ResponseWriter, req *http.Request) {
+	proposalResponse := proposalResponses.get()
+
+	submitErr := sendToSubmitter(proposalResponse)
+
+	if submitErr != nil {
+		http.Error(res, submitErr.Error(), http.StatusInternalServerError)
+		fmt.Println("submit Error ", submitErr)
+		return
+	}
+
+	// fmt.Println(string(proposalResponse.Content[0].Response.Payload))
+	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
+	return
+}
+
+func lengthHandler(res http.ResponseWriter, req *http.Request) {
+	fmt.Fprint(res, len(proposalResponses.proposalResponses))
 	return
 }
 

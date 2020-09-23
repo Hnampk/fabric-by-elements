@@ -99,7 +99,7 @@ func newServer() *server {
 	return s
 }
 
-func connectToChaincodeServer(client pb.GreeterClient) {
+func connectToChaincodeServer(client pb.GreeterClient, id int) {
 	ctx := context.Background()
 	stream, err := client.LanguageService(ctx)
 
@@ -111,7 +111,7 @@ func connectToChaincodeServer(client pb.GreeterClient) {
 	go func() {
 		for {
 			in, err := stream.Recv()
-			fmt.Println("received", in)
+			fmt.Println("received", id, in)
 
 			if err == io.EOF {
 				fmt.Println("OEF received")
@@ -157,17 +157,22 @@ func main() {
 
 	chaincodeServerHost = os.Args[1]
 
-	// Chaincode Client
-	var opts []grpc.DialOption
-	opts = append(opts, grpc.WithInsecure(), grpc.WithBlock())
+	var wg sync.WaitGroup
+	wg.Add(1)
 
-	conn, err := grpc.Dial(chaincodeServerHost+chaincodeServerPort, opts...)
-	if err != nil {
-		log.Fatalf("fail to dial: %v", err)
+	for i := 0; i < 2; i++ {
+		// Chaincode Client
+		var opts []grpc.DialOption
+		opts = append(opts, grpc.WithInsecure(), grpc.WithBlock())
+
+		conn, err := grpc.Dial(chaincodeServerHost+chaincodeServerPort, opts...)
+		if err != nil {
+			log.Fatalf("fail to dial: %v", err)
+		}
+		defer conn.Close()
+		client := pb.NewGreeterClient(conn)
+		go connectToChaincodeServer(client, i)
 	}
-	defer conn.Close()
-	client := pb.NewGreeterClient(conn)
-	connectToChaincodeServer(client)
 
 	requestIDIssuer = requestID{}
 

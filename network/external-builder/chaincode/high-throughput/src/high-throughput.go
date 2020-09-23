@@ -26,10 +26,12 @@ package main
  * 2 specific Hyperledger Fabric specific libraries for Smart Contracts
  */
 import (
+	"context"
+	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	// shim "../../../fabric-chaincode-go/shim"
 
@@ -37,12 +39,17 @@ import (
 	pb "github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/pkg/errors"
 
+	redis "github.com/go-redis/redis/v8"
 	// "google.golang.org/protobuf/internal/errors"
-	"github.com/snowzach/protosmart"
 )
 
 //SmartContract is the data structure which represents this contract and on which  various contract lifecycle functions are attached
 type SmartContract struct {
+}
+
+type ShimMessage struct {
+	Message string
+	Nonces  []string
 }
 
 type InternalWorldState struct {
@@ -86,8 +93,24 @@ func (w *InternalWorldState) updateAccountBalance(key string, value float64) err
 
 // Define Status codes for the response
 const (
-	OK    = 200
-	ERROR = 500
+	OK                    = 200
+	ERROR                 = 500
+	REDIS_HOST            = "172.16.79.8"
+	REDIS_PORT            = "6379"
+	REDIS_LOCK_SUFFIX     = "-lock"
+	REDIS_NONCE_SUFFIX    = "nonce"
+	REDIS_API_PUBSUB_CHAN = "api-chaincode-channel"
+)
+
+const (
+	RDB_TXSTATUS_WAITING = 0
+	RDB_TXSTATUS_SUCCESS = 1
+	RDB_TXSTATUS_FAILED  = 2
+)
+
+var (
+	isUseRedis = true
+	rdb        *redis.Client
 )
 
 // Init is called when the smart contract is instantiated
@@ -129,6 +152,170 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) pb.Response 
 	return shim.Error("Invalid Smart Contract function name.")
 }
 
+func rdbTryToLockKey(ctx context.Context, key string) (bool, error) {
+	isSuccess, err := rdb.SetNX(ctx, key+REDIS_LOCK_SUFFIX, "1", time.Second*30).Result()
+	if err != nil {
+		return false, err
+	}
+
+	if !isSuccess {
+		time.Sleep(time.Second)
+		return rdbTryToLockKey(ctx, key)
+	} else {
+		return true, nil
+	}
+}
+
+func rdbTryToUnlockKey(ctx context.Context, key string) error {
+	err := rdb.Del(ctx, key+REDIS_LOCK_SUFFIX).Err()
+	return err
+}
+
+func rdbDeposit(account string, balance float64, value float64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	rdb.Set(ctx, account, balance+value, 0)
+
+	return nil
+}
+
+func rdbWithdraw(account string, balance float64, value float64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	rdb.Set(ctx, account, balance-value, 0)
+
+	return nil
+}
+
+func rdbGetNonce(account string) int64 {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	nonce, err := rdb.Incr(ctx, account+"-"+REDIS_NONCE_SUFFIX).Result()
+
+	if err != nil {
+		return -1
+	}
+	return nonce
+}
+
+type rdbTxByNonce struct {
+	CompositeIndexKey string
+	Status            int
+}
+
+func rdbSaveTxByNonce(account string, nonce int64, compositeIndexKey string) (bool, error) {
+	ctx := context.Background()
+	key := account + "-" + strconv.FormatInt(nonce, 10)
+	data, err := json.Marshal(rdbTxByNonce{CompositeIndexKey: compositeIndexKey, Status: RDB_TXSTATUS_WAITING})
+
+	if err != nil {
+		return false, err
+	}
+
+	isSuccess, err := rdb.SetNX(ctx, key, data, 0).Result()
+
+	if err != nil {
+		return false, err
+	}
+
+	if !isSuccess {
+		fmt.Println("nonce existed")
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func rdbUpdateTxStatus(key string, status int) (bool, error) {
+	ctx := context.Background()
+	redisDataB, err := rdb.Get(ctx, key).Result()
+
+	if err != nil {
+		if err.Error() != "redis: nil" {
+			return false, err
+		}
+		// could do something here
+		// update of an inexistent key
+		return false, nil
+	}
+
+	var redisData rdbTxByNonce
+	json.Unmarshal([]byte(redisDataB), &redisData)
+	redisData.Status = status
+
+	data, err := json.Marshal(redisData)
+
+	if err != nil {
+		return false, err
+	}
+
+	_, err = rdb.Set(ctx, key, data, 0).Result()
+
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+/*
+	rdbFetchAccountBalance: for Redis
+*/
+func (s *SmartContract) rdbFetchAccountBalance(APIstub shim.ChaincodeStubInterface, account string, needValidate bool, valueFloat float64) (float64, error) {
+	getCtx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancel()
+
+	getResult, err := rdb.Get(getCtx, account).Result()
+	var balance float64
+
+	if err != nil {
+		if err.Error() != "redis: nil" {
+			return -1, err
+		}
+
+		// account balance is not existed in Redis
+		fmt.Println("[rdbFetchAccountBalance] missing account Balance")
+		var getResponse pb.Response
+		getResponse = s.get(APIstub, []string{account})
+
+		if getResponse.Status >= shim.ERRORTHRESHOLD {
+			// new account
+			balance = 0
+		} else {
+			balance, err = strconv.ParseFloat(string(getResponse.Payload), 64)
+
+			if err != nil {
+				return -1, errors.Errorf("getResponse.Payload is not float number??? %s", err.Error())
+			}
+
+			setCtx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+			defer cancel()
+			setError := rdb.Set(setCtx, account, balance, 0).Err()
+
+			if setError != nil {
+				return -1, errors.Errorf("Set Redis account balance error", setError)
+			}
+		}
+	} else {
+		balance, err = strconv.ParseFloat(getResult, 64)
+		if err != nil {
+			return -1, errors.Errorf("balance in Redis is not float number??? %s", err)
+		}
+	}
+
+	fmt.Println("balance", balance)
+
+	// only need to validate when operation is -
+	if needValidate && balance-valueFloat < 0 {
+		return -1, errors.Errorf("Invalid account %s's balance: %f", account, balance)
+	}
+
+	return balance, nil
+}
+
 /**
  * Updates the ledger to include a new delta for a particular variable. If this is the first time
  * this variable is being added to the ledger, then its initial value is assumed to be 0. The arguments
@@ -143,9 +330,6 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) pb.Response 
  *
  * @return A response structure indicating success or failure with a message
  */
-
-var temp = 1
-
 func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []string, helpUpdateInternalWS ...bool) pb.Response {
 	var err error
 
@@ -167,19 +351,56 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 		return shim.Error(fmt.Sprintf("Operator %s is unrecognized", op))
 	}
 
+	var balance float64
 	// ===== START VALIDATION =====
+	if !isUseRedis {
+		/*
+			USE VARIABLES FOR TEST
+		*/
+		internalWorldState.Lock()
+		defer internalWorldState.Unlock()
 
-	internalWorldState.Lock()
-	defer internalWorldState.Unlock()
+		if op == "-" {
+			err = s.fetchAccountBalance(APIstub, account, true, valueFloat)
+		} else {
+			err = s.fetchAccountBalance(APIstub, account, false, -1)
+		}
 
-	if op == "-" {
-		err = s.fetchAccountBalance(APIstub, account, true, valueFloat)
+		if err != nil {
+			return shim.Error(err.Error())
+		}
 	} else {
-		err = s.fetchAccountBalance(APIstub, account, false, -1)
-	}
+		/*
+			USE REDIS
+			todo:
+				(1) Lock account in Redis
+				(2) Defer unlock account in Redis
+				(3) Get account balance is Redis & Validate account balance on "-" operation
+		*/
+		ctx := context.Background()
+		// ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		// defer cancel()
 
-	if err != nil {
-		return shim.Error(err.Error())
+		isSucceed, err := rdbTryToLockKey(ctx, account)
+		defer rdbTryToUnlockKey(context.Background(), account)
+
+		if err != nil {
+			return shim.Error(err.Error())
+		}
+
+		if !isSucceed {
+			return shim.Error("Cannot lock key in Redis, somehow")
+		}
+
+		if op == "-" {
+			balance, err = s.rdbFetchAccountBalance(APIstub, account, true, valueFloat)
+		} else {
+			balance, err = s.rdbFetchAccountBalance(APIstub, account, false, -1) // passing -1 for nothing
+		}
+
+		if err != nil {
+			return shim.Error(err.Error())
+		}
 	}
 
 	// ===== END VALIDATION =====
@@ -201,22 +422,236 @@ func (s *SmartContract) update(APIstub shim.ChaincodeStubInterface, args []strin
 	}
 
 	if len(helpUpdateInternalWS) == 0 {
-		switch {
-		case op == "+":
-			internalWorldState.Deposit(account, valueFloat)
-		case op == "-":
-			internalWorldState.Withdraw(account, valueFloat)
+		if !isUseRedis {
+			/*
+				USE VARIABLES FOR TEST
+			*/
+			switch {
+			case op == "+":
+				internalWorldState.Deposit(account, valueFloat)
+			case op == "-":
+				internalWorldState.Withdraw(account, valueFloat)
+			}
+		} else {
+			/*
+				USE REDIS
+				todo:
+					(1) Update account balance in Redis
+			*/
+			switch {
+			case op == "+":
+				err = rdbDeposit(account, balance, valueFloat)
+			case op == "-":
+				err = rdbWithdraw(account, balance, valueFloat)
+			}
+
+			if err != nil {
+				// NAMPKH: should we continue without return an error here?
+				return shim.Error("Cannot update account balance in Redis!")
+			}
 		}
 	}
 
+	isSuccess := false
+	var nonce int64 = -1
+
+	for !isSuccess {
+		nonce = rdbGetNonce(account)
+		if nonce < 0 {
+			return shim.Error("Fail to get nonce for account: " + account)
+		}
+
+		isSuccess, err = rdbSaveTxByNonce(account, nonce, compositeKey)
+		if err != nil {
+			fmt.Println("Cannot rdbSaveTxByNonce to Redis!", err)
+			return shim.Error("Cannot rdbSaveTxByNonce to Redis!")
+		}
+	}
+
+	key := account + "-" + strconv.FormatInt(nonce, 10)
 	// eventErr := APIstub.SetEvent("updateEvent", []byte("event-hello"))
 	// if eventErr != nil {
 	// 	return shim.Error(fmt.Sprintf("Failed to emit event"))
 	// }
+	payload, err := json.Marshal(ShimMessage{Message: fmt.Sprintf("Successfully added %s%s to %s, nonce: %d", op, args[1], account, nonce), Nonces: []string{key}})
 
-	return shim.Success([]byte(fmt.Sprintf("Successfully added %s%s to %s", op, args[1], account)))
+	if err != nil {
+		fmt.Println("Fail to marshal payload", err)
+		return shim.Error("Fail to marshal payload")
+	}
+
+	return shim.Success(payload)
 }
 
+type updateResponse struct {
+	Payload []byte
+	Err     error
+}
+
+/**
+ * Updates the ledger to include a new delta for a particular variable. If this is the first time
+ * this variable is being added to the ledger, then its initial value is assumed to be 0. The arguments
+ * to give in the args array are as follows:
+ *	- args[0] -> name of the variable
+ *	- args[1] -> new delta (float)
+ *	- args[2] -> operation (currently supported are addition "+" and subtraction "-")
+ *
+ * @param APIstub The chaincode shim
+ * @param args The arguments array for the update invocation
+ * @param helpUpdateInternalWS give something into this slice will stop update Internal world state
+ *
+ * @return A response structure indicating success or failure with a message
+ */
+func (s *SmartContract) updateWithRoutine(APIstub shim.ChaincodeStubInterface, args []string, compositeKey string, respChan chan updateResponse, helpUpdateInternalWS ...bool) {
+	var err error
+
+	// Check we have a valid number of args
+	if len(args) != 3 {
+		respChan <- updateResponse{Payload: nil, Err: errors.Errorf("Incorrect number of arguments, expecting 3, got " + strconv.Itoa(len(args)))}
+		return
+	}
+
+	// Extract the args
+	account := args[0]
+	op := args[2]
+	valueFloat, err := strconv.ParseFloat(args[1], 64)
+	if err != nil {
+		respChan <- updateResponse{Payload: nil, Err: errors.Errorf("Provided value was not a number")}
+		return
+	}
+
+	// Make sure a valid operator is provided
+	if op != "+" && op != "-" {
+		respChan <- updateResponse{Payload: nil, Err: errors.Errorf(fmt.Sprintf("Operator %s is unrecognized", op))}
+		return
+	}
+
+	var balance float64
+	// ===== START VALIDATION =====
+	if !isUseRedis {
+		/*
+			USE VARIABLES FOR TEST
+		*/
+		internalWorldState.Lock()
+		defer internalWorldState.Unlock()
+
+		if op == "-" {
+			err = s.fetchAccountBalance(APIstub, account, true, valueFloat)
+		} else {
+			err = s.fetchAccountBalance(APIstub, account, false, -1)
+		}
+
+		if err != nil {
+			respChan <- updateResponse{Payload: nil, Err: err}
+			return
+		}
+	} else {
+		/*
+			USE REDIS
+			todo:
+				(1) Lock account in Redis
+				(2) Defer unlock account in Redis
+				(3) Get account balance is Redis & Validate account balance on "-" operation
+		*/
+		ctx := context.Background()
+		// ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		// defer cancel()
+
+		isSucceed, err := rdbTryToLockKey(ctx, account)
+		defer rdbTryToUnlockKey(context.Background(), account)
+
+		if err != nil {
+			respChan <- updateResponse{Payload: nil, Err: err}
+			return
+		}
+
+		if !isSucceed {
+			respChan <- updateResponse{Payload: nil, Err: errors.Errorf("Cannot lock key in Redis, somehow")}
+			return
+		}
+
+		if op == "-" {
+			balance, err = s.rdbFetchAccountBalance(APIstub, account, true, valueFloat)
+		} else {
+			balance, err = s.rdbFetchAccountBalance(APIstub, account, false, -1) // passing -1 for nothing
+		}
+
+		if err != nil {
+			respChan <- updateResponse{Payload: nil, Err: err}
+			return
+		}
+	}
+
+	// ===== END VALIDATION =====
+
+	if len(helpUpdateInternalWS) == 0 {
+		if !isUseRedis {
+			/*
+				USE VARIABLES FOR TEST
+			*/
+			switch {
+			case op == "+":
+				internalWorldState.Deposit(account, valueFloat)
+			case op == "-":
+				internalWorldState.Withdraw(account, valueFloat)
+			}
+		} else {
+			/*
+				USE REDIS
+				todo:
+					(1) Update account balance in Redis
+			*/
+			switch {
+			case op == "+":
+				err = rdbDeposit(account, balance, valueFloat)
+			case op == "-":
+				err = rdbWithdraw(account, balance, valueFloat)
+			}
+
+			if err != nil {
+				// NAMPKH: should we continue without return an error here?
+				respChan <- updateResponse{Payload: nil, Err: errors.Errorf("Cannot update account balance in Redis!")}
+				return
+			}
+		}
+	}
+
+	isSuccess := false
+	var nonce int64 = -1
+
+	for !isSuccess {
+		nonce = rdbGetNonce(account)
+		if nonce < 0 {
+			respChan <- updateResponse{Payload: nil, Err: errors.Errorf("Fail to get nonce for account: " + account)}
+			return
+		}
+
+		isSuccess, err = rdbSaveTxByNonce(account, nonce, compositeKey)
+		if err != nil {
+			respChan <- updateResponse{Payload: nil, Err: errors.Errorf("Cannot rdbSaveTxByNonce to Redis!", err)}
+			return
+		}
+	}
+
+	key := account + "-" + strconv.FormatInt(nonce, 10)
+	// eventErr := APIstub.SetEvent("updateEvent", []byte("event-hello"))
+	// if eventErr != nil {
+	// 	return shim.Error(fmt.Sprintf("Failed to emit event"))
+	// }
+	payload, err := json.Marshal(ShimMessage{Message: fmt.Sprintf("Successfully added %s%s to %s, nonce: %d", op, args[1], account, nonce), Nonces: []string{key}})
+
+	if err != nil {
+		respChan <- updateResponse{Payload: nil, Err: errors.Errorf("Fail to marshal payload", err)}
+		return
+	}
+
+	respChan <- updateResponse{Payload: payload, Err: nil}
+	return
+}
+
+/*
+	fetchAccountBalance: for variable using
+*/
 func (s *SmartContract) fetchAccountBalance(APIstub shim.ChaincodeStubInterface, account string, needValidate bool, valueFloat float64) error {
 	balance, err := internalWorldState.GetAccountBalance(account)
 
@@ -241,6 +676,7 @@ func (s *SmartContract) fetchAccountBalance(APIstub shim.ChaincodeStubInterface,
 
 	fmt.Println("balance", balance)
 
+	// only need to validate when operation is -
 	if needValidate && balance-valueFloat < 0 {
 		return errors.Errorf("Invalid account %s's balance: %f", account, balance)
 	}
@@ -281,28 +717,128 @@ func (s *SmartContract) transfer(APIstub shim.ChaincodeStubInterface, args []str
 	}
 
 	// ===== START VALIDATION & TRANSFER =====
+	tempChan := make(chan updateResponse)
 
-	senderUpdate := s.update(APIstub, []string{sourceAccount, value, "-"})
+	// Retrieve info needed for the update procedure
+	txid := APIstub.GetTxID()
+	compositeIndexKey := "account~op~value~txID"
 
-	if senderUpdate.Status > shim.ERRORTHRESHOLD {
-		return senderUpdate
+	// Create the composite key that will allow us to query for all deltas on a particular variable
+	compositeKeySource, compositeErr := APIstub.CreateCompositeKey(compositeIndexKey, []string{sourceAccount, "-", value, txid})
+	if compositeErr != nil {
+		return shim.Error(fmt.Sprintf("Could not create a composite key for %s: %s", sourceAccount, compositeErr.Error()))
 	}
 
-	receiverUpdate := s.update(APIstub, []string{destinationAccount, value, "+"})
-
-	if receiverUpdate.Status > shim.ERRORTHRESHOLD {
-		internalWorldState.Lock()
-		defer internalWorldState.Unlock()
-
-		// refund for source account
-		internalWorldState.Deposit(sourceAccount, valueFloat)
-
-		return receiverUpdate
+	// Save the composite key index
+	compositePutErr := APIstub.PutState(compositeKeySource, []byte{0x00})
+	if compositePutErr != nil {
+		return shim.Error(fmt.Sprintf("Could not put operation for %s in the ledger: %s", sourceAccount, compositePutErr.Error()))
 	}
+
+	// Create the composite key that will allow us to query for all deltas on a particular variable
+	compositeKeyDest, compositeErr := APIstub.CreateCompositeKey(compositeIndexKey, []string{destinationAccount, "+", value, txid})
+	if compositeErr != nil {
+		return shim.Error(fmt.Sprintf("Could not create a composite key for %s: %s", destinationAccount, compositeErr.Error()))
+	}
+
+	// Save the composite key index
+	compositePutErr = APIstub.PutState(compositeKeyDest, []byte{0x00})
+	if compositePutErr != nil {
+		return shim.Error(fmt.Sprintf("Could not put operation for %s in the ledger: %s", destinationAccount, compositePutErr.Error()))
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	messages := []ShimMessage{}
+	go func() {
+		for msg := range tempChan {
+			go func(msg updateResponse) {
+				var tempMsg ShimMessage
+
+				json.Unmarshal(msg.Payload, &tempMsg)
+				messages = append(messages, tempMsg)
+
+				wg.Done()
+			}(msg)
+		}
+	}()
+
+	go s.updateWithRoutine(APIstub, []string{sourceAccount, value, "-"}, compositeKeySource, tempChan)
+	go s.updateWithRoutine(APIstub, []string{destinationAccount, value, "+"}, compositeKeyDest, tempChan)
+
+	// var firstMessage ShimMessage
+	// var secondMessage ShimMessage
+
+	wg.Wait()
+	// Nampkh: should tuning here
+	// firstMsg := <-tempChan
+	// secondMsg := <-tempChan
+
+	// if firstMsg.Err != nil {
+	// 	if secondMsg.Err != nil {
+	// 		return shim.Error(firstMsg.Err.Error())
+	// 	}
+
+	// 	json.Unmarshal(secondMsg.Payload, &secondMessage)
+	// 	rdbUpdateTxStatus(secondMessage.Nonces[0], RDB_TXSTATUS_FAILED)
+
+	// 	return shim.Error(firstMsg.Err.Error())
+	// }
+
+	// if secondMsg.Err != nil {
+	// 	json.Unmarshal(firstMsg.Payload, &firstMessage)
+	// 	rdbUpdateTxStatus(firstMessage.Nonces[0], RDB_TXSTATUS_FAILED)
+
+	// 	return shim.Error(secondMsg.Err.Error())
+	// }
+	// json.Unmarshal(firstMsg.Payload, &firstMessage)
+	// json.Unmarshal(secondMsg.Payload, &secondMessage)
+
+	// senderUpdate := s.update(APIstub, []string{sourceAccount, value, "-"})
+	// var senderMessage ShimMessage
+	// json.Unmarshal(senderUpdate.Payload, &senderMessage)
+
+	// if senderUpdate.Status > shim.ERRORTHRESHOLD {
+	// 	rdbUpdateTxStatus(senderMessage.Nonces[0], RDB_TXSTATUS_FAILED)
+	// 	return senderUpdate
+	// }
+
+	// receiverUpdate := s.update(APIstub, []string{destinationAccount, value, "+"})
+	// var receiveMessage ShimMessage
+	// json.Unmarshal(receiverUpdate.Payload, &receiveMessage)
+
+	// if receiverUpdate.Status > shim.ERRORTHRESHOLD {
+	// 	if !isUseRedis {
+	// 		internalWorldState.Lock()
+	// 		defer internalWorldState.Unlock()
+
+	// 		// refund for source account
+	// 		internalWorldState.Deposit(sourceAccount, valueFloat)
+	// 	} else {
+	// 		senderUpdate := s.update(APIstub, []string{sourceAccount, value, "+"})
+
+	// 		// set tx status in redis to failed
+	// 		rdbUpdateTxStatus(senderMessage.Nonces[0], RDB_TXSTATUS_FAILED)
+
+	// 		if senderUpdate.Status > shim.ERRORTHRESHOLD {
+	// 			// return senderUpdate
+	// 		}
+	// 	}
+
+	// 	return receiverUpdate
+	// }
 
 	// ===== END VALIDATION & TRANSFER =====
 
-	return shim.Success([]byte(fmt.Sprintf("Successfully transfer %s from %s to %s", value, sourceAccount, destinationAccount)))
+	payload, err := json.Marshal(ShimMessage{Message: fmt.Sprintf("Successfully transfer %s from %s to %s", value, sourceAccount, destinationAccount), Nonces: []string{}})
+
+	if err != nil {
+		fmt.Println("Fail to marshal payload", err)
+		return shim.Error("Fail to marshal payload")
+	}
+
+	return shim.Success(payload)
+	// return shim.Success([]byte(fmt.Sprintf("Successfully transfer %s from %s to %s", value, sourceAccount, destinationAccount)))
 }
 
 /**
@@ -519,44 +1055,6 @@ func f2barr(f float64) []byte {
 	return []byte(str)
 }
 
-var internalWorldState InternalWorldState
-
-// The main function is only relevant in unit test mode. Only included here for completeness.
-func main() {
-	internalWorldState = InternalWorldState{value: make(map[string]float64)}
-
-	// // Create a new Smart Contract
-	// err := shim.Start(new(SmartContract))
-	// if err != nil {
-	// 	fmt.Printf("Error creating new Smart Contract: %s", err)
-	// }
-
-	if len(os.Args) < 3 {
-		fmt.Println("Please supply:\n- installed chaincodeID  (using the “peer lifecycle chaincode install <package>” command)\n- chaincode address (host:port)")
-		return
-	}
-
-	ccid := os.Args[1]
-	address := os.Args[2]
-
-	server := &shim.ChaincodeServer{
-		CCID:    ccid,
-		Address: address,
-		CC:      new(SmartContract),
-		TLSProps: shim.TLSProperties{
-			Disabled: true,
-		},
-	}
-
-	protosmart.OverrideCodec("proto")
-	fmt.Println("Start Chaincode server on " + address)
-	err := server.Start()
-	if err != nil {
-		fmt.Printf("Error starting Simple chaincode: %s", err)
-		return
-	}
-}
-
 /**
  * All functions below this are for testing traditional editing of a single row
  */
@@ -606,6 +1104,7 @@ func (s *SmartContract) getStandard(APIstub shim.ChaincodeStubInterface, args []
 	}
 
 	return shim.Success(val)
+	// return shim.Success([]byte("val"))
 }
 
 func (s *SmartContract) delStandard(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
@@ -617,4 +1116,80 @@ func (s *SmartContract) delStandard(APIstub shim.ChaincodeStubInterface, args []
 	}
 
 	return shim.Success(nil)
+}
+
+var internalWorldState InternalWorldState
+
+// The main function is only relevant in unit test mode. Only included here for completeness.
+func main() {
+	internalWorldState = InternalWorldState{value: make(map[string]float64)}
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     REDIS_HOST + ":" + REDIS_PORT,
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	ctx := context.Background()
+	pubsub := rdb.Subscribe(ctx, REDIS_API_PUBSUB_CHAN)
+
+	// Wait for confirmation that subscription is created before publishing anything.
+	_, err := pubsub.Receive(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	// Go channel which receives messages.
+	ch := pubsub.Channel()
+
+	// Consume messages.
+	go func() {
+		for msg := range ch {
+			var message ShimMessage
+			json.Unmarshal([]byte(msg.Payload), &message)
+
+			// update tx status in redis by nonce
+			for _, key := range message.Nonces {
+				statusInt, err := strconv.Atoi(message.Message)
+				if err != nil {
+					fmt.Println(err)
+				}
+
+				rdbUpdateTxStatus(key, statusInt)
+			}
+
+		}
+	}()
+
+	// // Create a new Smart Contract
+	err = shim.Start(new(SmartContract))
+	if err != nil {
+		fmt.Printf("Error creating new Smart Contract: %s", err)
+	}
+
+	// excc
+	// if len(os.Args) < 3 {
+	// 	fmt.Println("Please supply:\n- installed chaincodeID  (using the “peer lifecycle chaincode install <package>” command)\n- chaincode address (host:port)")
+	// 	return
+	// }
+
+	// ccid := os.Args[1]
+	// address := os.Args[2]
+
+	// server := &shim.ChaincodeServer{
+	// 	CCID:    ccid,
+	// 	Address: address,
+	// 	CC:      new(SmartContract),
+	// 	TLSProps: shim.TLSProperties{
+	// 		Disabled: true,
+	// 	},
+	// }
+
+	// protosmart.OverrideCodec("proto")
+	// fmt.Println("Start Chaincode server on " + address)
+	// err = server.Start()
+	// if err != nil {
+	// 	fmt.Printf("Error starting Simple chaincode: %s", err)
+	// 	return
+	// }
+
 }
