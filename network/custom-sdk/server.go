@@ -38,7 +38,7 @@ type Proposer struct {
 	tartgetPeerAddress string // merge this
 	peerMSPID          string // merge this
 	org                string // merge this
-
+	channelID          string
 }
 
 type ProposalWrapper struct {
@@ -94,8 +94,6 @@ var peerAddress = ""
 
 const ordererAddress = "orderer.example.com:7050"
 
-var peerMSPID = "Org3MSP"
-
 // Define Status codes for the response
 const (
 	OK                    = 200
@@ -113,11 +111,10 @@ var (
 	rdb                *redis.Client
 	channelID          = "vnpay-channel"
 	rootURL            = "/home/ewallet/network/"
-	signerConfig       signerLib.Config
 	chaincodeName      = "mycc1"
 	port               = "8090"
 	waitForEvent       = false
-	deliverPeerAddress = []string{"peer0.org1.example.com:7051"}
+	deliverPeerAddress = []string{"peer0.org4.example.com:7051", "peer0.org5.example.com:7051"}
 	workerNum          = 10
 	invokeChannel      = make(chan ProposalWrapper)
 	queryChannel       = make(chan ProposalWrapper)
@@ -176,11 +173,6 @@ func main() {
 	if os.Args[1] == "0" {
 		rootURL = "/home/nampkh/nampkh/my-fabric/network/"
 	}
-	signerConfig = signerLib.Config{
-		MSPID:        peerMSPID,
-		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org3.example.com/users/Admin@org3.example.com/msp/signcerts/Admin@org3.example.com-cert.pem",
-		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org3.example.com/users/Admin@org3.example.com/msp/keystore/priv_sk",
-	}
 
 	port = os.Args[2]
 	channelID = os.Args[3]
@@ -195,7 +187,7 @@ func main() {
 
 	initProposerPool(workerNum)
 	err = initSubmitterPool(workerNum)
-	initListenerPool(1)
+	initListenerPool(workerNum)
 
 	if err != nil {
 		fmt.Println("An error occurred while initSubmitterPool: ", err)
@@ -222,31 +214,38 @@ func main() {
 
 func initProposerPool(poolSize int) {
 	for i := 0; i < poolSize; i++ {
+		var peerMSPID string
 		var org string
+		var channel string
 
 		if i%poolSize == 0 {
-			peerAddress = "peer0.org1.example.com:7051"
-			peerMSPID = "Org1MSP"
-			org = "org1.example.com"
+			peerAddress = "peer0.org4.example.com:7051"
+			peerMSPID = "Org4MSP"
+			org = "org4.example.com"
+			channel = "vnpay-channel4"
 		} else if i%poolSize == 1 {
-			peerAddress = "peer0.org2.example.com:7051"
-			peerMSPID = "Org2MSP"
-			org = "org2.example.com"
+			peerAddress = "peer0.org5.example.com:7051"
+			peerMSPID = "Org5MSP"
+			org = "org5.example.com"
+			channel = "vnpay-channel5"
 		} else if i%poolSize == 2 {
 			peerAddress = "peer0.org3.example.com:7051"
 			peerMSPID = "Org3MSP"
 			org = "org3.example.com"
+			channel = "vnpay-channel3"
 		} else if i%poolSize == 3 {
 			peerAddress = "peer0.org4.example.com:7051"
 			peerMSPID = "Org4MSP"
 			org = "org4.example.com"
+			channel = "vnpay-channel4"
 		} else {
 			peerAddress = "peer0.org5.example.com:7051"
 			peerMSPID = "Org5MSP"
 			org = "org5.example.com"
+			channel = "vnpay-channel5"
 		}
 
-		proposer, err := initProposer(i, peerAddress, peerMSPID, org)
+		proposer, err := initProposer(i, peerAddress, peerMSPID, org, channel)
 
 		if err != nil {
 			fmt.Println("[ERROR]initProposerPool:", err)
@@ -259,7 +258,7 @@ func initProposerPool(poolSize int) {
 	}
 }
 
-func initProposer(id int, tartgetPeerAddress string, peerMSPID string, org string) (*Proposer, error) {
+func initProposer(id int, tartgetPeerAddress string, peerMSPID string, org string, channel string) (*Proposer, error) {
 	cc, err := grpc.Dial(tartgetPeerAddress, grpc.WithInsecure()) // Without TLS, for test only
 
 	if err != nil {
@@ -279,6 +278,7 @@ func initProposer(id int, tartgetPeerAddress string, peerMSPID string, org strin
 		tartgetPeerAddress: tartgetPeerAddress,
 		peerMSPID:          peerMSPID,
 		org:                org,
+		channelID:          channel,
 	}, nil
 }
 
@@ -354,7 +354,7 @@ func (p *Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 	// Nampkh: must feed empty txID
 	txID := ""
 
-	prop, txID, err := protoutil.CreateChaincodeProposalWithTxIDAndTransient(pcommon.HeaderType_ENDORSER_TRANSACTION, channelID, invocation, creator, txID, tMap)
+	prop, txID, err := protoutil.CreateChaincodeProposalWithTxIDAndTransient(pcommon.HeaderType_ENDORSER_TRANSACTION, p.channelID, invocation, creator, txID, tMap)
 	if err != nil {
 		// fmt.Println("[ERROR] propose: CreateChaincodeProposalWithTxIDAndTransient:", err)
 		return nil, err
@@ -589,7 +589,54 @@ func (s *Submitter) submit(env *pcommon.Envelope) error {
 
 func initListenerPool(poolSize int) {
 	for i := 0; i < poolSize; i++ {
-		listener, err := initSubmissionListener(i)
+		var peerAddress string
+		var channelID string
+		var signerConfig signerLib.Config
+
+		if i%poolSize == 0 {
+			peerAddress = "peer0.org4.example.com"
+			channelID = "vnpay-channel4"
+			signerConfig = signerLib.Config{
+				MSPID:        "Org4MSP",
+				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org4.example.com/users/Admin@org4.example.com/msp/signcerts/Admin@org4.example.com-cert.pem",
+				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org4.example.com/users/Admin@org4.example.com/msp/keystore/priv_sk",
+			}
+
+		} else if i%poolSize == 1 {
+			peerAddress = "peer0.org5.example.com"
+			channelID = "vnpay-channel5"
+			signerConfig = signerLib.Config{
+				MSPID:        "Org5MSP",
+				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org5.example.com/users/Admin@org5.example.com/msp/signcerts/Admin@org5.example.com-cert.pem",
+				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org5.example.com/users/Admin@org5.example.com/msp/keystore/priv_sk",
+			}
+		} else if i%poolSize == 2 {
+			peerAddress = "peer0.org3.example.com"
+			channelID = "vnpay-channel3"
+			signerConfig = signerLib.Config{
+				MSPID:        "Org3MSP",
+				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org3.example.com/users/Admin@org3.example.com/msp/signcerts/Admin@org3.example.com-cert.pem",
+				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org3.example.com/users/Admin@org3.example.com/msp/keystore/priv_sk",
+			}
+		} else if i%poolSize == 3 {
+			peerAddress = "peer0.org4.example.com"
+			channelID = "vnpay-channel4"
+			signerConfig = signerLib.Config{
+				MSPID:        "Org4MSP",
+				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org4.example.com/users/Admin@org4.example.com/msp/signcerts/Admin@org4.example.com-cert.pem",
+				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org4.example.com/users/Admin@org4.example.com/msp/keystore/priv_sk",
+			}
+		} else {
+			peerAddress = "peer0.org5.example.com"
+			channelID = "vnpay-channel5"
+			signerConfig = signerLib.Config{
+				MSPID:        "Org5MSP",
+				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org5.example.com/users/Admin@org5.example.com/msp/signcerts/Admin@org5.example.com-cert.pem",
+				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org5.example.com/users/Admin@org5.example.com/msp/keystore/priv_sk",
+			}
+		}
+
+		listener, err := initSubmissionListener(i, peerAddress, channelID, signerConfig)
 
 		if err != nil {
 
@@ -599,10 +646,10 @@ func initListenerPool(poolSize int) {
 	}
 }
 
-func initSubmissionListener(id int) (*SubmissionListener, error) {
+func initSubmissionListener(id int, peerAddress string, channelID string, signerConfig signerLib.Config) (*SubmissionListener, error) {
 	ctx := context.Background()
 
-	dg, err := createDeliverGroup(ctx, "")
+	dg, err := createDeliverGroup(ctx, "", peerAddress, channelID, signerConfig)
 
 	if err != nil {
 		return nil, err
@@ -615,11 +662,11 @@ func initSubmissionListener(id int) (*SubmissionListener, error) {
 	}, nil
 }
 
-func createDeliverGroup(ctx context.Context, txID string) (*chaincode.DeliverGroup, error) {
+func createDeliverGroup(ctx context.Context, txID string, peerAddress string, channelID string, signerConfig signerLib.Config) (*chaincode.DeliverGroup, error) {
 	signer, err := signerLib.NewSigner(signerConfig)
 
 	deliverClients := []pb.DeliverClient{}
-	deliverClient, err := common.GetPeerDeliverClientFnc(deliverPeerAddress[0], "tlsRootCertFile")
+	deliverClient, err := common.GetPeerDeliverClientFnc(peerAddress+":7051", "tlsRootCertFile")
 	if err != nil {
 		fmt.Println("[ERROR]createPeerDeliverClient: GetPeerDeliverClientFnc", err)
 		return nil, errors.Errorf("[ERROR]createPeerDeliverClient: GetPeerDeliverClientFnc", err)
@@ -643,8 +690,8 @@ func createDeliverGroup(ctx context.Context, txID string) (*chaincode.DeliverGro
 
 	dg = NewDeliverGroup(
 		deliverClients,
-		// []string{peerAddress},
-		[]string{"peer0.org1.example.com", "peer0.org2.example.com", "peer0.org3.example.com", "peer0.org4.example.com", "peer0.org5.example.com"},
+		[]string{peerAddress},
+		// []string{"peer0.org1.example.com", "peer0.org2.example.com", "peer0.org3.example.com", "peer0.org4.example.com", "peer0.org5.example.com"},
 		signer,
 		certificate,
 		channelID,

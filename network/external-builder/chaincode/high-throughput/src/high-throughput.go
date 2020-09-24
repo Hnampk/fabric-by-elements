@@ -95,7 +95,6 @@ func (w *InternalWorldState) updateAccountBalance(key string, value float64) err
 const (
 	OK                    = 200
 	ERROR                 = 500
-	REDIS_HOST            = "172.16.79.8"
 	REDIS_PORT            = "6379"
 	REDIS_LOCK_SUFFIX     = "-lock"
 	REDIS_NONCE_SUFFIX    = "nonce"
@@ -109,12 +108,44 @@ const (
 )
 
 var (
+	REDIS_HOST = "redis.example.com"
 	isUseRedis = true
 	rdb        *redis.Client
 )
 
 // Init is called when the smart contract is instantiated
 func (s *SmartContract) Init(APIstub shim.ChaincodeStubInterface) pb.Response {
+
+	_, args := APIstub.GetFunctionAndParameters()
+
+	if len(args) < 1 {
+		return shim.Error("Please supply redis host!")
+	}
+
+	REDIS_HOST = args[0]
+
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     REDIS_HOST + ":" + REDIS_PORT,
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	return shim.Success(nil)
+}
+func (s *SmartContract) changeredis(APIstub shim.ChaincodeStubInterface, args []string) pb.Response {
+
+	if len(args) < 1 {
+		return shim.Error("Please supply redis host!")
+	}
+
+	REDIS_HOST = args[0]
+
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     REDIS_HOST + ":" + REDIS_PORT,
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
 	return shim.Success(nil)
 }
 
@@ -147,6 +178,8 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) pb.Response 
 		return s.getStandard(APIstub, args)
 	} else if function == "delstandard" {
 		return s.delStandard(APIstub, args)
+	} else if function == "changeredis" {
+		return s.changeredis(APIstub, args)
 	}
 
 	return shim.Error("Invalid Smart Contract function name.")
@@ -717,7 +750,6 @@ func (s *SmartContract) transfer(APIstub shim.ChaincodeStubInterface, args []str
 	}
 
 	// ===== START VALIDATION & TRANSFER =====
-	tempChan := make(chan updateResponse)
 
 	// Retrieve info needed for the update procedure
 	txid := APIstub.GetTxID()
@@ -747,10 +779,12 @@ func (s *SmartContract) transfer(APIstub shim.ChaincodeStubInterface, args []str
 		return shim.Error(fmt.Sprintf("Could not put operation for %s in the ledger: %s", destinationAccount, compositePutErr.Error()))
 	}
 
+	tempChan := make(chan updateResponse)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	messages := []ShimMessage{}
-	go func() {
+
+	func() {
 		for msg := range tempChan {
 			go func(msg updateResponse) {
 				var tempMsg ShimMessage
@@ -766,10 +800,11 @@ func (s *SmartContract) transfer(APIstub shim.ChaincodeStubInterface, args []str
 	go s.updateWithRoutine(APIstub, []string{sourceAccount, value, "-"}, compositeKeySource, tempChan)
 	go s.updateWithRoutine(APIstub, []string{destinationAccount, value, "+"}, compositeKeyDest, tempChan)
 
+	wg.Wait()
+
 	// var firstMessage ShimMessage
 	// var secondMessage ShimMessage
 
-	wg.Wait()
 	// Nampkh: should tuning here
 	// firstMsg := <-tempChan
 	// secondMsg := <-tempChan
@@ -1123,45 +1158,40 @@ var internalWorldState InternalWorldState
 // The main function is only relevant in unit test mode. Only included here for completeness.
 func main() {
 	internalWorldState = InternalWorldState{value: make(map[string]float64)}
-	rdb = redis.NewClient(&redis.Options{
-		Addr:     REDIS_HOST + ":" + REDIS_PORT,
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
 
-	ctx := context.Background()
-	pubsub := rdb.Subscribe(ctx, REDIS_API_PUBSUB_CHAN)
+	// ctx := context.Background()
+	// pubsub := rdb.Subscribe(ctx, REDIS_API_PUBSUB_CHAN)
 
-	// Wait for confirmation that subscription is created before publishing anything.
-	_, err := pubsub.Receive(ctx)
-	if err != nil {
-		panic(err)
-	}
+	// // Wait for confirmation that subscription is created before publishing anything.
+	// _, err := pubsub.Receive(ctx)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	// Go channel which receives messages.
-	ch := pubsub.Channel()
+	// // Go channel which receives messages.
+	// ch := pubsub.Channel()
 
-	// Consume messages.
-	go func() {
-		for msg := range ch {
-			var message ShimMessage
-			json.Unmarshal([]byte(msg.Payload), &message)
+	// // Consume messages.
+	// go func() {
+	// 	for msg := range ch {
+	// 		var message ShimMessage
+	// 		json.Unmarshal([]byte(msg.Payload), &message)
 
-			// update tx status in redis by nonce
-			for _, key := range message.Nonces {
-				statusInt, err := strconv.Atoi(message.Message)
-				if err != nil {
-					fmt.Println(err)
-				}
+	// 		// update tx status in redis by nonce
+	// 		for _, key := range message.Nonces {
+	// 			statusInt, err := strconv.Atoi(message.Message)
+	// 			if err != nil {
+	// 				fmt.Println(err)
+	// 			}
 
-				rdbUpdateTxStatus(key, statusInt)
-			}
+	// 			rdbUpdateTxStatus(key, statusInt)
+	// 		}
 
-		}
-	}()
+	// 	}
+	// }()
 
 	// // Create a new Smart Contract
-	err = shim.Start(new(SmartContract))
+	err := shim.Start(new(SmartContract))
 	if err != nil {
 		fmt.Printf("Error creating new Smart Contract: %s", err)
 	}
