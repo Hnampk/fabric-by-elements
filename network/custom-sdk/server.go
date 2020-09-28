@@ -114,7 +114,7 @@ var (
 	chaincodeName      = "mycc1"
 	port               = "8090"
 	waitForEvent       = false
-	deliverPeerAddress = []string{"peer0.org4.example.com:7051", "peer0.org5.example.com:7051"}
+	deliverPeerAddress = []string{"peer0.org1.example.com:7051", "peer0.org2.example.com:7051", "peer0.org3.example.com:7051", "peer0.org4.example.com:7051", "peer0.org5.example.com:7051"}
 	workerNum          = 10
 	invokeChannel      = make(chan ProposalWrapper)
 	queryChannel       = make(chan ProposalWrapper)
@@ -219,15 +219,15 @@ func initProposerPool(poolSize int) {
 		var channel string
 
 		if i%poolSize == 0 {
-			peerAddress = "peer0.org4.example.com:7051"
-			peerMSPID = "Org4MSP"
-			org = "org4.example.com"
-			channel = "vnpay-channel4"
+			peerAddress = "peer0.org1.example.com:7051"
+			peerMSPID = "Org1MSP"
+			org = "org1.example.com"
+			channel = "vnpay-channel"
 		} else if i%poolSize == 1 {
-			peerAddress = "peer0.org5.example.com:7051"
-			peerMSPID = "Org5MSP"
-			org = "org5.example.com"
-			channel = "vnpay-channel5"
+			peerAddress = "peer0.org2.example.com:7051"
+			peerMSPID = "Org2MSP"
+			org = "org2.example.com"
+			channel = "vnpay-channel2"
 		} else if i%poolSize == 2 {
 			peerAddress = "peer0.org3.example.com:7051"
 			peerMSPID = "Org3MSP"
@@ -469,7 +469,7 @@ func sendToSubmitter(proposalResponse ProposalResponse) error {
 }
 
 func createPeerDeliverClient() error {
-	for _, deliverClientAddr := range deliverPeerAddress {
+	for _, deliverClientAddr := range deliverPeerAddress[:workerNum] {
 		deliverClient, err := common.GetPeerDeliverClientFnc(deliverClientAddr, "tlsRootCertFile")
 		if err != nil {
 			fmt.Println("[ERROR]createPeerDeliverClient: GetPeerDeliverClientFnc", err)
@@ -594,21 +594,21 @@ func initListenerPool(poolSize int) {
 		var signerConfig signerLib.Config
 
 		if i%poolSize == 0 {
-			peerAddress = "peer0.org4.example.com"
-			channelID = "vnpay-channel4"
+			peerAddress = "peer0.org1.example.com"
+			channelID = "vnpay-channel"
 			signerConfig = signerLib.Config{
-				MSPID:        "Org4MSP",
-				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org4.example.com/users/Admin@org4.example.com/msp/signcerts/Admin@org4.example.com-cert.pem",
-				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org4.example.com/users/Admin@org4.example.com/msp/keystore/priv_sk",
+				MSPID:        "Org1MSP",
+				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
+				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
 			}
 
 		} else if i%poolSize == 1 {
-			peerAddress = "peer0.org5.example.com"
-			channelID = "vnpay-channel5"
+			peerAddress = "peer0.org2.example.com"
+			channelID = "vnpay-channel2"
 			signerConfig = signerLib.Config{
-				MSPID:        "Org5MSP",
-				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org5.example.com/users/Admin@org5.example.com/msp/signcerts/Admin@org5.example.com-cert.pem",
-				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org5.example.com/users/Admin@org5.example.com/msp/keystore/priv_sk",
+				MSPID:        "Org2MSP",
+				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp/signcerts/Admin@org2.example.com-cert.pem",
+				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp/keystore/priv_sk",
 			}
 		} else if i%poolSize == 2 {
 			peerAddress = "peer0.org3.example.com"
