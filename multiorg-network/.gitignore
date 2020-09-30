@@ -1,0 +1,7 @@
+orderer/crypto-config
+orderer/data
+orderer/etcdraft
+peer/crypto-config
+channel-artifacts
+
+vendor*
