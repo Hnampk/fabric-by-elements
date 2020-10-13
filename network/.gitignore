@@ -1,0 +1,10 @@
+peer/data/
+peer/crypto-config/
+
+orderer/data/
+orderer/crypto-config/
+
+sdk/data/
+
+custom-sdk/server
+*.block

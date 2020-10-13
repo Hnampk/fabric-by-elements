@@ -235,10 +235,10 @@ Application: &ApplicationDefaults
             Rule: "MAJORITY Admins"
         LifecycleEndorsement:
             Type: ImplicitMeta
-            Rule: "MAJORITY Endorsement"
+            Rule: "ANY Endorsement"
         Endorsement:
             Type: ImplicitMeta
-            Rule: "MAJORITY Endorsement"
+            Rule: "ANY Endorsement"
 
     Capabilities:
         <<: *ApplicationCapabilities
@@ -263,7 +263,7 @@ Orderer: &OrdererDefaults
           ServerTLSCert: ./orderer/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
 
     # Batch Timeout: The amount of time to wait before creating a batch
-    BatchTimeout: 1s
+    BatchTimeout: 500ms
 
     # Batch Size: Controls the number of messages batched into a block
     BatchSize:

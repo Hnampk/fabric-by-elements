@@ -1,0 +1,1 @@
+{ "path": "external-builder/chaincode/simple-chaincode/src", "type": "golang", "label": "mycc2" }

@@ -789,34 +789,34 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, proposalResp.Response.Message, http.StatusInternalServerError)
 		return
 	}
-	var response SuccessMessage
-	err = json.Unmarshal(proposalResponse.Content[0].Response.Payload, &response)
-	if err != nil {
-		fmt.Println("failed to unmarshal payload")
-		return
-	}
+	// var response SuccessMessage
+	// err = json.Unmarshal(proposalResponse.Content[0].Response.Payload, &response)
+	// if err != nil {
+	// 	fmt.Println("failed to unmarshal payload")
+	// 	return
+	// }
 
-	// fmt.Println(response.Message)
+	// // fmt.Println(response.Message)
 
-	//
-	// =========================== SUBMIT PHASE ===========================
+	// //
+	// // =========================== SUBMIT PHASE ===========================
 
 	submitErr := sendToSubmitter(proposalResponse)
 
-	var ctx = context.Background()
+	// var ctx = context.Background()
 
 	if submitErr != nil {
-		http.Error(res, submitErr.Error(), http.StatusInternalServerError)
-		// Publish a message.
-		// payload, _ := json.Marshal(SuccessMessage{Nonce: response.Nonce, Message: RDB_TXSTATUS_FAILED})
-		go rdb.Publish(ctx, REDIS_API_PUBSUB_CHAN, SuccessMessage{Nonces: response.Nonces, Message: RDB_TXSTATUS_FAILED})
+		// http.Error(res, submitErr.Error(), http.StatusInternalServerError)
+		// // Publish a message.
+		// // payload, _ := json.Marshal(SuccessMessage{Nonce: response.Nonce, Message: RDB_TXSTATUS_FAILED})
+		// go rdb.Publish(ctx, REDIS_API_PUBSUB_CHAN, SuccessMessage{Nonces: response.Nonces, Message: RDB_TXSTATUS_FAILED})
 
 		fmt.Println("submit Error ", submitErr)
 		return
 	}
 
-	payload, _ := json.Marshal(SuccessMessage{Nonces: response.Nonces, Message: RDB_TXSTATUS_SUCCESS})
-	go rdb.Publish(ctx, REDIS_API_PUBSUB_CHAN, payload)
+	// payload, _ := json.Marshal(SuccessMessage{Nonces: response.Nonces, Message: RDB_TXSTATUS_SUCCESS})
+	// go rdb.Publish(ctx, REDIS_API_PUBSUB_CHAN, payload)
 
 	fmt.Fprint(res, "submitted, txid: "+proposalResponse.TxID)
 	return

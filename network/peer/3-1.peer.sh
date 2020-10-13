@@ -1,7 +1,7 @@
 export FABRIC_CFG_PATH=${PWD}/../
 #Generic peer variables
 export CORE_VM_ENDPOINT=unix://var/run/docker.sock
-export CORE_VM_ENDPOINT=tcp://172.16.79.8:2376
+#export CORE_VM_ENDPOINT=tcp://172.16.79.8:2376
 
 # the following setting starts chaincode containers on the same
 # bridge network as the peers

@@ -2,30 +2,34 @@
 docker rm $(docker ps -aq)
 
 echo "============CLEAN ORDERER DATA============"
-cd orderer/
-if [ -d "data" ]; then
-rm -Rf data
+cd orderers/
+if [ -d orderers/org1/orderer1/data ]; then
+rm -Rf orderers/org1/orderer1/data
+rm -Rf orderers/org1/orderer1/etcdraft
 fi
 
-if [ -d "etcdraft" ]; then
-rm -Rf etcdraft
+if [ -d orderers/org2/orderer1/etcdraft ]; then
+rm -Rf orderers/org2/orderer1/data
+rm -Rf orderers/org2/orderer1/etcdraft
+fi
+
+if [ -d orderers/org2/orderer2/etcdraft ]; then
+rm -Rf orderers/org2/orderer2/data
+rm -Rf orderers/org2/orderer2/etcdraft
+fi
+
+if [ -d orderers/org3/orderer1/etcdraft ]; then
+rm -Rf orderers/org3/orderer1/data
+rm -Rf orderers/org3/orderer1/etcdraft
 fi
 
 sleep 2
 
 
 echo "============CLEAN PEER DATA============"
-cd ../peer
-if [ -d "data" ]; then
-rm -rf data/*
-fi
-
-sleep 2
-
-echo "============CLEAN CHAINCODE DATA============"
-cd ../sdk
-if [ -d "data" ]; then
-rm -R data/*
+cd ../peers
+if [ -d peer0/data ] || [ -d peer1/data ] || [ -d peer2/data ] || [ -d peer3/data ]; then
+rm -rf peer*/data
 fi
 
 sleep 2

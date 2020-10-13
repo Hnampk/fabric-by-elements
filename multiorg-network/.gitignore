@@ -2,6 +2,8 @@ orderer/crypto-config
 orderer/data
 orderer/etcdraft
 peer/crypto-config
-channel-artifacts
+channel-artifacts*/channel.tx
+channel-artifacts*/genesis.block
+channel-artifacts*/*MSPanchors.tx
 
 vendor*

@@ -89,11 +89,6 @@ type EventResponse struct {
 	errCode pb.TxValidationCode
 }
 
-// hard-code for testing only
-var peerAddress = ""
-
-const ordererAddress = "orderer1.org1.example.com:7050"
-
 // Define Status codes for the response
 const (
 	OK                    = 200
@@ -109,8 +104,8 @@ const (
 
 var (
 	rdb            *redis.Client
-	channelID      = "vnpay-channel"
-	rootURL        = "/home/ewallet/network/"
+	channelID      = "vnpay-channel-2"
+	rootURL        = "/home/ewallet/multiorg-network/"
 	chaincodeName  = "mycc1"
 	port           = "8090"
 	waitForEvent   = false
@@ -119,6 +114,9 @@ var (
 	queryChannel   = make(chan ProposalWrapper)
 	submitChannel  = make(chan SignedProposalWrapper)
 	deliverClients = []pb.DeliverClient{}
+	targetPeer     = ""
+	targetOrg      = ""
+	targetOrderer  = ""
 )
 
 /*
@@ -169,6 +167,21 @@ func main() {
 		return
 	}
 
+	if len(os.Args) < 7 {
+		fmt.Println("Which peer? (ex: peer0)")
+		return
+	}
+
+	if len(os.Args) < 8 {
+		fmt.Println("Which org? (ex: org1)")
+		return
+	}
+
+	if len(os.Args) < 9 {
+		fmt.Println("Which orderer? (ex: orderer1)")
+		return
+	}
+
 	if os.Args[1] == "0" {
 		rootURL = "/home/nampkh/nampkh/my-fabric/multiorg-network/"
 	}
@@ -176,6 +189,9 @@ func main() {
 	port = os.Args[2]
 	channelID = os.Args[3]
 	chaincodeName = os.Args[4]
+	targetPeer = os.Args[6]
+	targetOrg = os.Args[7]
+	targetOrderer = os.Args[8]
 
 	var err error
 	workerNum, err = strconv.Atoi(os.Args[5])
@@ -185,8 +201,8 @@ func main() {
 	}
 
 	initProposerPool(workerNum)
-	err = initSubmitterPool(workerNum)
-	initListenerPool(workerNum)
+	err = initSubmitterPool(2)
+	initListenerPool(1)
 
 	if err != nil {
 		fmt.Println("An error occurred while initSubmitterPool: ", err)
@@ -212,56 +228,27 @@ func main() {
 }
 
 func initProposerPool(poolSize int) {
+	// connect to peer 0 as event deliver
+	peerAddress := "peer0." + targetOrg + ".example.com:7051"
+	peerMSPID := "O" + targetOrg[1:] + "MSP" // ex: Org1MSP
+	org := targetOrg + ".example.com"
+	channel := channelID
+	tlsRootCertFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/peer0." + targetOrg + ".example.com/tls/ca.crt"
+	clientKeyFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/peer0." + targetOrg + ".example.com/tls/server.key"
+	clientCertFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/peer0." + targetOrg + ".example.com/tls/server.crt"
+
+	_, err := initProposer(-1, peerAddress, peerMSPID, org, channel, tlsRootCertFile, clientKeyFile, clientCertFile)
+
+	if err != nil {
+		fmt.Println("[ERROR]initProposerPool:", err)
+		return
+	}
+
 	for i := 0; i < poolSize; i++ {
-		var peerMSPID string
-		var org string
-		var channel string
-
-		var tlsRootCertFile string
-		var clientKeyFile string
-		var clientCertFile string
-
-		if i%poolSize == 0 {
-			peerAddress = "peer0.org1.example.com:7051"
-			peerMSPID = "Org1MSP"
-			org = "org1.example.com"
-			channel = "vnpay-channel"
-			tlsRootCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt"
-			clientKeyFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.key"
-			clientCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.crt"
-		} else if i%poolSize == 1 {
-			peerAddress = "peer1.org1.example.com:7051"
-			peerMSPID = "Org1MSP"
-			org = "org1.example.com"
-			channel = "vnpay-channel"
-			tlsRootCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/ca.crt"
-			clientKeyFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/server.key"
-			clientCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/server.crt"
-		} else if i%poolSize == 2 {
-			peerAddress = "peer2.org1.example.com:7051"
-			peerMSPID = "Org1MSP"
-			org = "org1.example.com"
-			channel = "vnpay-channel"
-			tlsRootCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer2.org1.example.com/tls/ca.crt"
-			clientKeyFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer2.org1.example.com/tls/server.key"
-			clientCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer2.org1.example.com/tls/server.crt"
-		} else if i%poolSize == 3 {
-			peerAddress = "peer3.org1.example.com:7051"
-			peerMSPID = "Org1MSP"
-			org = "org1.example.com"
-			channel = "vnpay-channel"
-			tlsRootCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer3.org1.example.com/tls/ca.crt"
-			clientKeyFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer3.org1.example.com/tls/server.key"
-			clientCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer3.org1.example.com/tls/server.crt"
-		} else {
-			peerAddress = "peer4.org1.example.com:7051"
-			peerMSPID = "Org1MSP"
-			org = "org1.example.com"
-			channel = "vnpay-channel"
-			tlsRootCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer4.org1.example.com/tls/ca.crt"
-			clientKeyFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer4.org1.example.com/tls/server.key"
-			clientCertFile = "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer4.org1.example.com/tls/server.crt"
-		}
+		peerAddress = targetPeer + "." + targetOrg + ".example.com:7051"
+		tlsRootCertFile = "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/ca.crt"
+		clientKeyFile = "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.key"
+		clientCertFile = "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.crt"
 
 		proposer, err := initProposer(i, peerAddress, peerMSPID, org, channel, tlsRootCertFile, clientKeyFile, clientCertFile)
 
@@ -271,7 +258,6 @@ func initProposerPool(poolSize int) {
 		}
 
 		proposer.requestChannel = invokeChannel
-
 		go proposer.start()
 	}
 }
@@ -348,6 +334,7 @@ func initProposer(id int, tartgetPeerAddress string, peerMSPID string, org strin
 
 	if len(deliverClients) == 0 {
 		deliverClients = append(deliverClients, deliverClient)
+		fmt.Println("deliver client: ", tartgetPeerAddress)
 	}
 
 	return &Proposer{
@@ -396,8 +383,8 @@ func (p *Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 
 	var signerConfig = signerLib.Config{
 		MSPID:        p.peerMSPID,
-		IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/signcerts/Admin@" + p.org + "-cert.pem",
-		KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/keystore/priv_sk",
+		IdentityPath: rootURL + "peers/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/signcerts/Admin@" + p.org + "-cert.pem",
+		KeyPath:      rootURL + "peers/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/keystore/priv_sk",
 	}
 
 	signer, err := signerLib.NewSigner(signerConfig)
@@ -490,20 +477,13 @@ func processProposals(endorserClients []pb.EndorserClient, signedProposal pb.Sig
 }
 
 func initSubmitterPool(poolSize int) error {
-	for i := 0; i < poolSize; i++ {
+	for i := 0; i < 1; i++ {
 		submitter := Submitter{
 			Id: i,
 		}
 
-		var ordererAddress string
-		var tlsRootCertFile string
-		if i%poolSize == 0 {
-			ordererAddress = "orderer1.org1.example.com:7050"
-			tlsRootCertFile = "../orderer/crypto-config/ordererOrganizations/org1.example.com/orderers/orderer1.org1.example.com/tls/ca.crt"
-		} else {
-			ordererAddress = "orderer2.org1.example.com:7050"
-			tlsRootCertFile = "../orderer/crypto-config/ordererOrganizations/org1.example.com/orderers/orderer2.org1.example.com/tls/ca.crt"
-		}
+		var ordererAddress string = targetOrderer + "." + targetOrg + ".example.com:7050"
+		var tlsRootCertFile string = "../orderers/crypto-config/ordererOrganizations/" + targetOrg + ".example.com/orderers/" + targetOrderer + "." + targetOrg + ".example.com/tls/ca.crt"
 
 		err := submitter.connectToOrderer(ordererAddress, tlsRootCertFile)
 
@@ -552,8 +532,8 @@ func sendToSubmitter(proposalResponse ProposalResponse) error {
 
 func (s *Submitter) connectToOrderer(tartgetOrdererAddress string, tlsRootCertFile string) error {
 
-	clientKeyFile := "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.key"
-	clientCertFile := "../peer/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.crt"
+	clientKeyFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.key"
+	clientCertFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.crt"
 
 	clientConfig := comm.ClientConfig{}
 	clientConfig.Timeout = 30 * time.Second
@@ -684,56 +664,20 @@ func (s *Submitter) submit(env *pcommon.Envelope) error {
 func initListenerPool(poolSize int) {
 	for i := 0; i < poolSize; i++ {
 		var peerAddress string
-		var channelID string
 		var signerConfig signerLib.Config
 
-		if i%poolSize == 0 {
-			peerAddress = "peer0.org1.example.com"
-			channelID = "vnpay-channel"
-			signerConfig = signerLib.Config{
-				MSPID:        "Org1MSP",
-				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
-				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
-			}
-
-		} else if i%poolSize == 1 {
-			peerAddress = "peer1.org1.example.com"
-			channelID = "vnpay-channel"
-			signerConfig = signerLib.Config{
-				MSPID:        "Org1MSP",
-				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
-				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
-			}
-		} else if i%poolSize == 2 {
-			peerAddress = "peer2.org1.example.com"
-			channelID = "vnpay-channel"
-			signerConfig = signerLib.Config{
-				MSPID:        "Org1MSP",
-				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
-				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
-			}
-		} else if i%poolSize == 3 {
-			peerAddress = "peer3.org1.example.com"
-			channelID = "vnpay-channel"
-			signerConfig = signerLib.Config{
-				MSPID:        "Org1MSP",
-				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
-				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
-			}
-		} else {
-			peerAddress = "peer4.org1.example.com"
-			channelID = "vnpay-channel"
-			signerConfig = signerLib.Config{
-				MSPID:        "Org1MSP",
-				IdentityPath: rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
-				KeyPath:      rootURL + "peer/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
-			}
+		// if i%poolSize == 0 {
+		peerAddress = "peer0." + targetOrg + ".example.com"
+		signerConfig = signerLib.Config{
+			MSPID:        "O" + targetOrg[1:] + "MSP", // ex: Org1MSP
+			IdentityPath: rootURL + "peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/users/Admin@" + targetOrg + ".example.com/msp/signcerts/Admin@" + targetOrg + ".example.com-cert.pem",
+			KeyPath:      rootURL + "peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/users/Admin@" + targetOrg + ".example.com/msp/keystore/priv_sk",
 		}
 
 		listener, err := initSubmissionListener(i, peerAddress, channelID, signerConfig)
 
 		if err != nil {
-
+			fmt.Println("heeeee", err)
 		}
 
 		go listener.start()
@@ -776,7 +720,6 @@ func createDeliverGroup(ctx context.Context, txID string, peerAddress string, ch
 	dg = NewDeliverGroup(
 		deliverClients,
 		[]string{peerAddress},
-		// []string{"peer0.org1.example.com", "peer0.org2.example.com", "peer0.org3.example.com", "peer0.org4.example.com", "peer0.org5.example.com"},
 		signer,
 		certificate,
 		channelID,
