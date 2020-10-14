@@ -46,6 +46,8 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) peer.Respons
 		return s.prune(APIstub, args)
 	} else if function == "update-account-service" {
 		return s.updateAccountService(APIstub, args)
+	} else if function == "reverse" {
+		return s.reverse(APIstub, args)
 	}
 
 	return shim.Error("Invalid Smart Contract function name.")
@@ -291,6 +293,27 @@ func (s *SmartContract) updateAccountService(APIstub shim.ChaincodeStubInterface
 	return shim.Success([]byte(fmt.Sprintf("Successfully change the accountServiceURL to %s", accountServiceURL)))
 }
 
+func (s *SmartContract) reverse(APIstub shim.ChaincodeStubInterface, args []string) peer.Response {
+	if len(args) != 1 {
+		return shim.Error("Incorrect number of arguments, expecting 1: (1) txID")
+	}
+
+	txID := args[0]
+
+	ctx := context.Background()
+	reverseResponse, err := client.Reverse(ctx, &pb.ReverseRequest{TxID: txID})
+
+	if err != nil {
+		fmt.Println("could not Reverse:", err)
+		return shim.Error(fmt.Sprintf("could not Reverse: %s ", err.Error()))
+	}
+	if !reverseResponse.Status {
+		return shim.Error(fmt.Sprintf("reverseResponse error: %s", reverseResponse.Message))
+	}
+
+	return shim.Success([]byte(fmt.Sprintf("Successfully reverse tx: ", accountServiceURL)))
+}
+
 func createAccount(txID string, accountID string) error {
 	ctx := context.Background()
 
@@ -338,6 +361,10 @@ func withdraw(txID string, accountID string, value float64) error {
 	}
 
 	fmt.Println(withdrawResponse.Message)
+	return nil
+}
+
+func reverse(txID string) error {
 	return nil
 }
 

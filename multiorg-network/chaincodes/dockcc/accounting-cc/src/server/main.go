@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	pb "example.com/simple-chaincode/accounting_service"
@@ -17,7 +18,14 @@ import (
 )
 
 const (
-	port = ":50052"
+	port                            = ":50052"
+	ERROR_DUPLICATE_ENTRY           = "1062"
+	VALID_DUPLICATE_DURATION        = 10 // 30s
+	VALID_DUPLICATE_ENTRY           = "200"
+	DAILY_TRANSACTION_ON_PROCESS    = 0
+	DAILY_TRANSACTION_SUCCEED       = 1
+	DAILY_TRANSACTION_REVERSED      = 2
+	DAILY_TRANSACTION_FOR_REVERSION = 3
 )
 
 var (
@@ -54,6 +62,10 @@ func (s *server) Deposit(ctx context.Context, in *pb.DepositRequest) (*pb.Deposi
 
 	err := deposit(txID, accountID, float64(value))
 	if err != nil {
+		if strings.Contains(err.Error(), VALID_DUPLICATE_ENTRY) {
+			return &pb.DepositReply{Status: true, Message: "Tx on processing!" + txID}, nil
+		}
+
 		return &pb.DepositReply{Status: false, Message: err.Error()}, nil
 	}
 
@@ -73,6 +85,19 @@ func (s *server) Withdraw(ctx context.Context, in *pb.WithdrawRequest) (*pb.With
 	}
 
 	return &pb.WithdrawReply{Status: true, Message: "Successfully deposit!"}, nil
+}
+
+func (s *server) Reverse(ctx context.Context, in *pb.ReverseRequest) (*pb.ReverseReply, error) {
+	txID := in.GetTxID()
+
+	log.Printf("[Received request] Reverse txID: %v ", txID)
+
+	err := reverse(txID)
+	if err != nil {
+		return &pb.ReverseReply{Status: true, Message: err.Error()}, nil
+	}
+
+	return &pb.ReverseReply{Status: true, Message: "Reverse Successfully!"}, nil
 }
 
 func main() {
@@ -114,6 +139,7 @@ func main() {
 	}
 }
 
+// ============================= START query SQL functions =============================
 func queryInsertAccount(tx *sql.Tx, accountID string, txID string) error {
 	_, err := tx.Exec(`
 	INSERT INTO account_balance (account_id, hash) VALUES (?, ?);
@@ -154,10 +180,50 @@ func queryInsertDailyTransaction(tx *sql.Tx, accountID string, traceID string, c
 
 	if err != nil {
 		log.Println("[ERROR]", err)
+
+		if strings.Contains(err.Error(), ERROR_DUPLICATE_ENTRY) {
+			dailyTxStatement, err2 := db.Prepare(`
+			SELECT unix_timestamp(date) FROM daily_transaction
+			WHERE unique_id = ?;
+			`) //
+			defer dailyTxStatement.Close()
+			var date int64
+			err2 = dailyTxStatement.QueryRow(uniqueID).Scan(&date)
+
+			if err2 != nil {
+				log.Println("[ERROR]", err2)
+				return errors.Errorf("[queryInsertDailyTransaction] account not exist:", accountID)
+			}
+
+			if time.Now().Unix()-date > VALID_DUPLICATE_DURATION {
+				// this unique id has been used before!
+				return err
+			}
+
+			return errors.Errorf(VALID_DUPLICATE_ENTRY + ", created at: " + strconv.Itoa(int(date*1000)))
+		}
+
 		return err
 	}
 
 	return nil
+}
+
+func querySelectDailyTransactionByTxID(txID string) (*sql.Row, error) {
+	dtStatement, err := db.Prepare(`
+		SELECT unique_id, id, account_id, trace_id, pre_id, code, pre_balance, value, balance, status, hash, unix_timestamp(date) 
+		FROM daily_transaction
+		WHERE hash = ?
+		`) // ? = placeholder
+
+	if err != nil {
+		log.Panicln(err)
+		return nil, err
+	}
+
+	defer dtStatement.Close() // Close the statement when we leave main() / the program terminates
+
+	return dtStatement.QueryRow(txID), nil
 }
 
 func querySelectDailyTransactionCreateAccount(accountID string) (*sql.Row, error) {
@@ -177,6 +243,23 @@ func querySelectDailyTransactionCreateAccount(accountID string) (*sql.Row, error
 	return dtStatement.QueryRow(accountID), nil
 }
 
+func queryUpdateDailyTransactionByUniqueID(tx *sql.Tx, uniqueID string, status int) error {
+	_, err := tx.Exec(`
+	UPDATE daily_transaction
+	SET status=?
+	WHERE unique_id=?;
+	`, status, uniqueID)
+
+	if err != nil {
+		log.Println("[ERROR]", err)
+		return err
+	}
+
+	return nil
+}
+
+// ============================= END query SQL functions =============================
+
 func updateAccountBalance(tx *sql.Tx, accountID string, balance float64, accountTxCount int64, lastBalance float64) error {
 	_, err := tx.Exec(`
 	UPDATE account_balance
@@ -192,7 +275,7 @@ func updateAccountBalance(tx *sql.Tx, accountID string, balance float64, account
 	return nil
 }
 
-func deposit(txID string, accountID string, value float64) error {
+func deposit(txID string, accountID string, value float64, status ...int) error {
 	var uniqueID int64
 	var balance float64
 	var currentAccountTxCount int64
@@ -229,7 +312,13 @@ func deposit(txID string, accountID string, value float64) error {
 
 	defer tx.Rollback()
 
-	err = queryInsertDailyTransaction(tx, accountID, "", currentAccountTxCount, "+", balance, value, balance+value, 0, txID)
+	if len(status) > 0 {
+		// for reverse query
+		err = queryInsertDailyTransaction(tx, accountID, "", currentAccountTxCount, "+", balance, value, balance+value, status[0], txID)
+	} else {
+		err = queryInsertDailyTransaction(tx, accountID, "", currentAccountTxCount, "+", balance, value, balance+value, DAILY_TRANSACTION_ON_PROCESS, txID)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -250,7 +339,7 @@ func deposit(txID string, accountID string, value float64) error {
 	return nil
 }
 
-func withdraw(txID string, accountID string, value float64) error {
+func withdraw(txID string, accountID string, value float64, status ...int) error {
 	var uniqueID int64
 	var balance float64
 	var currentAccountTxCount int64
@@ -287,7 +376,13 @@ func withdraw(txID string, accountID string, value float64) error {
 
 	defer tx.Rollback()
 
-	err = queryInsertDailyTransaction(tx, accountID, "", currentAccountTxCount, "-", balance, value, balance-value, 0, txID)
+	if len(status) > 0 {
+		// for reverse query
+		err = queryInsertDailyTransaction(tx, accountID, "", currentAccountTxCount, "-", balance, value, balance-value, status[0], txID)
+	} else {
+		err = queryInsertDailyTransaction(tx, accountID, "", currentAccountTxCount, "-", balance, value, balance-value, DAILY_TRANSACTION_ON_PROCESS, txID)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -306,6 +401,85 @@ func withdraw(txID string, accountID string, value float64) error {
 
 	log.Println("Successfully withdraw", value, "from account", accountID, ", new balace:", balance-value)
 	return nil
+}
+
+func reverse(txID string) error {
+	var uniqueID string
+	var id int64
+	var accountID string
+	var traceID string
+	var preID string
+	var code string
+	var prebalance float64
+	var value float64
+	var balance float64
+	var status int
+	var hash string
+	var date int64
+
+	queryDTrow, err := querySelectDailyTransactionByTxID(txID)
+	if err != nil {
+		log.Println("[DailyTransactionByTxID] tx not exist:", txID)
+		return err
+	}
+
+	err = queryDTrow.Scan(&uniqueID, &id, &accountID, &traceID, &preID, &code, &prebalance, &value, &balance, &status, &hash, &date)
+	if err != nil {
+		log.Println("[ERROR]", err)
+		return nil
+	}
+
+	log.Println("tx detail: ")
+
+	if status == DAILY_TRANSACTION_ON_PROCESS {
+		// start reverse process
+		if code == "+" {
+			err := withdraw(txID, accountID, value, DAILY_TRANSACTION_FOR_REVERSION)
+
+			if err != nil {
+				log.Println("[ERROR]", err)
+				return errors.Errorf("[ERROR] failed to reverse transaction: ", txID)
+			}
+		} else {
+			err := deposit(txID, accountID, value, DAILY_TRANSACTION_FOR_REVERSION)
+
+			if err != nil {
+				log.Println("[ERROR]", err)
+				return errors.Errorf("[ERROR] failed to reverse transaction: ", txID)
+			}
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			log.Println("[ERROR]", err)
+			return err
+		}
+
+		defer tx.Rollback()
+
+		// update daily transaction status
+		err = queryUpdateDailyTransactionByUniqueID(tx, uniqueID, DAILY_TRANSACTION_REVERSED)
+		if err != nil {
+			log.Println("[ERROR]", err)
+			return err
+		}
+
+		err = tx.Commit()
+
+		if err != nil {
+			log.Println("[ERROR]", err)
+			return err
+		}
+
+	} else {
+		// ???
+	}
+
+	return nil
+}
+
+func reverseAccountBalance() {
+
 }
 
 func depositPreCheck(accountID string, balance float64, value float64) error {

@@ -28,7 +28,7 @@ export CORE_PEER_ADDRESS=${PEER}.${ORG}.example.com:${PORT}
 export CORE_PEER_LISTENADDRESS=${PEER}.${ORG}.example.com:${PORT}
 export CORE_PEER_CHAINCODEADDRESS=${IP_ADDRESS}:${CC_PORT}
 export CORE_PEER_CHAINCODELISTENADDRESS=${IP_ADDRESS}:${CC_PORT}
-export CORE_PEER_GOSSIP_BOOTSTRAP=peer0.${ORG}.example.com:${PORT}
+export CORE_PEER_GOSSIP_BOOTSTRAP=peer1.${ORG}.example.com:${PORT}
 export CORE_PEER_GOSSIP_EXTERNALENDPOINT=${PEER}.${ORG}.example.com:${PORT}
 
 ../../../bin/peer node start

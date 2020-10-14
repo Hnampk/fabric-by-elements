@@ -21,6 +21,7 @@ type AccountingClient interface {
 	CreateAccount(ctx context.Context, in *CreateAccountRequest, opts ...grpc.CallOption) (*CreateAccountReply, error)
 	Deposit(ctx context.Context, in *DepositRequest, opts ...grpc.CallOption) (*DepositReply, error)
 	Withdraw(ctx context.Context, in *WithdrawRequest, opts ...grpc.CallOption) (*WithdrawReply, error)
+	Reverse(ctx context.Context, in *ReverseRequest, opts ...grpc.CallOption) (*ReverseReply, error)
 }
 
 type accountingClient struct {
@@ -58,6 +59,15 @@ func (c *accountingClient) Withdraw(ctx context.Context, in *WithdrawRequest, op
 	return out, nil
 }
 
+func (c *accountingClient) Reverse(ctx context.Context, in *ReverseRequest, opts ...grpc.CallOption) (*ReverseReply, error) {
+	out := new(ReverseReply)
+	err := c.cc.Invoke(ctx, "/accounting_service.Accounting/Reverse", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AccountingServer is the server API for Accounting service.
 // All implementations must embed UnimplementedAccountingServer
 // for forward compatibility
@@ -66,6 +76,7 @@ type AccountingServer interface {
 	CreateAccount(context.Context, *CreateAccountRequest) (*CreateAccountReply, error)
 	Deposit(context.Context, *DepositRequest) (*DepositReply, error)
 	Withdraw(context.Context, *WithdrawRequest) (*WithdrawReply, error)
+	Reverse(context.Context, *ReverseRequest) (*ReverseReply, error)
 	mustEmbedUnimplementedAccountingServer()
 }
 
@@ -81,6 +92,9 @@ func (UnimplementedAccountingServer) Deposit(context.Context, *DepositRequest) (
 }
 func (UnimplementedAccountingServer) Withdraw(context.Context, *WithdrawRequest) (*WithdrawReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Withdraw not implemented")
+}
+func (UnimplementedAccountingServer) Reverse(context.Context, *ReverseRequest) (*ReverseReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Reverse not implemented")
 }
 func (UnimplementedAccountingServer) mustEmbedUnimplementedAccountingServer() {}
 
@@ -149,6 +163,24 @@ func _Accounting_Withdraw_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Accounting_Reverse_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReverseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AccountingServer).Reverse(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/accounting_service.Accounting/Reverse",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AccountingServer).Reverse(ctx, req.(*ReverseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var _Accounting_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "accounting_service.Accounting",
 	HandlerType: (*AccountingServer)(nil),
@@ -164,6 +196,10 @@ var _Accounting_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Withdraw",
 			Handler:    _Accounting_Withdraw_Handler,
+		},
+		{
+			MethodName: "Reverse",
+			Handler:    _Accounting_Reverse_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

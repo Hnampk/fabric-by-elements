@@ -140,7 +140,7 @@ Organizations:
             # for cross org gossip communication.  Note, this value is only
             # encoded in the genesis block in the Application section context
             - Host: peer0.org3.example.com
-              Port: 7051
+              Port: 8051
 
 
 ################################################################################
@@ -228,7 +228,7 @@ Application: &ApplicationDefaults
             Rule: "MAJORITY Admins"
         LifecycleEndorsement:
             Type: ImplicitMeta
-            Rule: "ANY Endorsement"
+            Rule: "MAJORITY Endorsement"
         Endorsement:
             Type: ImplicitMeta
             Rule: "MAJORITY Endorsement"
@@ -246,7 +246,7 @@ Application: &ApplicationDefaults
 Orderer: &OrdererDefaults
 
     # Orderer Type: The orderer implementation to start
-    OrdererType: etcdraft
+    OrdererType: solo
 
     # Batch Timeout: The amount of time to wait before creating a batch
     BatchTimeout: 500ms
@@ -346,32 +346,13 @@ Profiles:
         <<: *ChannelDefaults
         Orderer:
             <<: *OrdererDefaults
-            OrdererType: etcdraft
-            EtcdRaft:
-                Consenters:
-                - Host: orderer2.org2.example.com
-                  Port: 7050
-                  ClientTLSCert: ../orderers/crypto-config/ordererOrganizations/org2.example.com/orderers/orderer2.org2.example.com/tls/server.crt
-                  ServerTLSCert: ../orderers/crypto-config/ordererOrganizations/org2.example.com/orderers/orderer2.org2.example.com/tls/server.crt
-                - Host: orderer1.org3.example.com
-                  Port: 7050
-                  ClientTLSCert: ../orderers/crypto-config/ordererOrganizations/org3.example.com/orderers/orderer1.org3.example.com/tls/server.crt
-                  ServerTLSCert: ../orderers/crypto-config/ordererOrganizations/org3.example.com/orderers/orderer1.org3.example.com/tls/server.crt
-            Addresses:
-                - orderer2.org2.example.com:7050
-                - orderer1.org3.example.com:7050
             Organizations:
-            - *OrdererOrg2
-            - *OrdererOrg3
+                - *OrdererOrg2
             Capabilities:
                 <<: *OrdererCapabilities
-        Application:
-            <<: *ApplicationDefaults
-            Organizations:
-            - <<: *OrdererOrg2
-            - <<: *OrdererOrg3
+                
         Consortiums:
             SampleConsortium:
                 Organizations:
-                - *Org2
-                - *Org3
+                    - *Org2
+                    - *Org3
