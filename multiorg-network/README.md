@@ -20,3 +20,5 @@ Luồng chạy test sharding:
 9. cài đặt chaincode ở peer3.org2 (bỏ qua commit nếu cần nhiều đồng thuận - check file configtx.yaml > Application > Policies > Endorsement)
 10. copy file nén chaincode trong folder peers/org2/peer3/packed-cc/* cho peer1.org3
 11. cài đặt chaincode ở peer1.org3, thực hiện commit
+
+    * _: bộ script dùng start 1 cụm blockchain, gồm: 1 orderer, 2 peers với 1 peer cài đặt chaincode

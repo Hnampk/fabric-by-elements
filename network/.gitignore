@@ -1,8 +1,8 @@
-peer/data/
-peer/crypto-config/
+peer/data
+peer/crypto-config
 
-orderer/data/
-orderer/crypto-config/
+orderer/data
+orderer/crypto-config
 
 sdk/data/
 

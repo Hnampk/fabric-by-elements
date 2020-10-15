@@ -1,0 +1,9 @@
+orderers/crypto-config
+orderers/data
+orderers/etcdraft
+
+peers/data*
+peers/crypto-config
+
+channel-artifacts/*.tx
+channel-artifacts/*.block
