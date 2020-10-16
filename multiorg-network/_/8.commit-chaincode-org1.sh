@@ -1,3 +1,5 @@
+source .env
+
 # Peer environment variables
 export FABRIC_CFG_PATH=./peers
 
@@ -20,7 +22,7 @@ export CORE_PEER_TLS_ROOTCERT_FILE=$PWD/peers/crypto-config/peerOrganizations/$O
 export CORE_PEER_TLS_CERT_FILE=$PWD/peers/crypto-config/peerOrganizations/$ORG.$CONSORTIUM/peers/$PEER.$ORG.$CONSORTIUM/tls/server.crt
 export CORE_PEER_TLS_KEY_FILE=$PWD/peers/crypto-config/peerOrganizations/$ORG.$CONSORTIUM/peers/$PEER.$ORG.$CONSORTIUM/tls/server.key
 
-export ORDERER_ADDRESS=$ORDERER.$CONSORTIUM:$ORDERER_PORT
+# export ORDERER_ADDRESS=$ORDERER.$CONSORTIUM:$ORDERER_PORT
 export ORDERER_CA=$PWD/orderers/crypto-config/ordererOrganizations/$CONSORTIUM/orderers/$ORDERER.$CONSORTIUM/msp/tlscacerts/tlsca.$CONSORTIUM-cert.pem
 
 
