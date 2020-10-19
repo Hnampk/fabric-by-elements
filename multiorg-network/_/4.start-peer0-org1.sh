@@ -1,9 +1,10 @@
 # START peer0.org1
+source .env
 
 export FABRIC_CFG_PATH=./peers
 export PEER=peer0
 export ORG=org1
-export IP_ADDRESS=172.16.79.8
+export IP_ADDRESS=$ORG1_IP
 export PORT=7051
 export CC_PORT=7052
 export CONSORTIUM=example.com

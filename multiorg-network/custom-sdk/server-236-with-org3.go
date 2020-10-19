@@ -229,32 +229,32 @@ func main() {
 
 func initProposerPool(poolSize int) {
 	// connect to peer 0 as event deliver
-	peerAddress := "peer2." + targetOrg + ".example.com:7051"
-	peerMSPID := "O" + targetOrg[1:] + "MSP" // ex: Org1MSP
-	org := targetOrg + ".example.com"
-	channel := channelID
-	tlsRootCertFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/peer0." + targetOrg + ".example.com/tls/ca.crt"
-	clientKeyFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/peer0." + targetOrg + ".example.com/tls/server.key"
-	clientCertFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/peer0." + targetOrg + ".example.com/tls/server.crt"
+	peerAddress := "peer0.org1.example.com:7051"
+	peerMSPID := "Org1MSP" // ex: Org1MSP
+	org := "org1.example.com"
+	channel := "vnpay-chanel"
+	tlsRootCertFile := "../_/peers/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt"
+	clientKeyFile := "../_/peers/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.key"
+	clientCertFile := "../_/peers/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.crt"
 
-	_, err := initProposer(-1, []string{peerAddress}, peerMSPID, org, channel, tlsRootCertFile, clientKeyFile, clientCertFile)
-
-	if err != nil {
-		fmt.Println("[ERROR]initProposerPool:", err)
-		return
-	}
-
-	peerAddress = targetPeer + "." + targetOrg + ".example.com:7051"
-	tlsRootCertFile = "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/ca.crt"
-	clientKeyFile = "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.key"
-	clientCertFile = "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.crt"
-
-	proposer, err := initProposer(0, []string{peerAddress}, peerMSPID, org, channel, tlsRootCertFile, clientKeyFile, clientCertFile)
+	proposer, err := initProposer(-1, []string{peerAddress}, peerMSPID, org, channel, tlsRootCertFile, clientKeyFile, clientCertFile)
 
 	if err != nil {
 		fmt.Println("[ERROR]initProposerPool:", err)
 		return
 	}
+
+	// peerAddress = targetPeer + "." + targetOrg + ".example.com:7051"
+	// tlsRootCertFile = "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/ca.crt"
+	// clientKeyFile = "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.key"
+	// clientCertFile = "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.crt"
+
+	// proposer, err := initProposer(0, []string{peerAddress}, peerMSPID, org, channel, tlsRootCertFile, clientKeyFile, clientCertFile)
+
+	// if err != nil {
+	// 	fmt.Println("[ERROR]initProposerPool:", err)
+	// 	return
+	// }
 
 	proposer.requestChannel = invokeChannel
 	go proposer.start()
@@ -295,7 +295,7 @@ func initProposer(id int, tartgetPeerAddresses []string, peerMSPID string, org s
 	// }
 
 	secOpts := comm.SecureOptions{
-		UseTLS:            true,
+		UseTLS:            false,
 		RequireClientCert: true,
 	}
 
@@ -383,14 +383,14 @@ func (p *Proposer) start() {
 	// }
 
 	secOpts := comm.SecureOptions{
-		UseTLS:            true,
-		RequireClientCert: true,
+		UseTLS:            false,
+		RequireClientCert: false,
 	}
 
-	peerAddress := "peer3.org2.example.com:7051"
-	tlsRootCertFile := "../peers/crypto-config/peerOrganizations/org2.example.com/peers/peer3.org2.example.com/tls/ca.crt"
-	clientKeyFile := "../peers/crypto-config/peerOrganizations/org2.example.com/peers/peer3.org2.example.com/tls/server.key"
-	clientCertFile := "../peers/crypto-config/peerOrganizations/org2.example.com/peers/peer3.org2.example.com/tls/server.crt"
+	peerAddress := "peer1.org1.example.com:8051"
+	tlsRootCertFile := "../_/peers/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/ca.crt"
+	clientKeyFile := "../_/peers/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/server.key"
+	clientCertFile := "../_/peers/crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/server.crt"
 
 	if secOpts.RequireClientCert {
 		keyPEM, err := ioutil.ReadFile(clientKeyFile)
@@ -449,14 +449,14 @@ func (p *Proposer) start() {
 	// }
 
 	secOpts2 := comm.SecureOptions{
-		UseTLS:            true,
+		UseTLS:            false,
 		RequireClientCert: true,
 	}
 
-	peerAddress2 := "peer1.org3.example.com:7051"
-	tlsRootCertFile2 := "../peers/crypto-config/peerOrganizations/org3.example.com/peers/peer1.org3.example.com/tls/ca.crt"
-	clientKeyFile2 := "../peers/crypto-config/peerOrganizations/org3.example.com/peers/peer1.org3.example.com/tls/server.key"
-	clientCertFile2 := "../peers/crypto-config/peerOrganizations/org3.example.com/peers/peer1.org3.example.com/tls/server.crt"
+	peerAddress2 := "peer1.org2.example.com:8051"
+	tlsRootCertFile2 := "../_/peers/crypto-config/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/tls/ca.crt"
+	clientKeyFile2 := "../_/peers/crypto-config/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/tls/server.key"
+	clientCertFile2 := "../_/peers/crypto-config/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/tls/server.crt"
 
 	if secOpts2.RequireClientCert {
 		keyPEM, err := ioutil.ReadFile(clientKeyFile2)
@@ -501,10 +501,17 @@ func (p *Proposer) start() {
 	endorserClients2 := []pb.EndorserClient{}
 	endorserClients2 = append(endorserClients2, e2)
 
+	// ===========================================
+	// ===========================================
+	// ===========================================
+	// ===========================================
+	// ===========================================
+	// ===========================================
+
 	var signerConfig = signerLib.Config{
-		MSPID:        "Org2MSP",
-		IdentityPath: rootURL + "peers/crypto-config/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp/signcerts/Admin@org2.example.com-cert.pem",
-		KeyPath:      rootURL + "peers/crypto-config/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp/keystore/priv_sk",
+		MSPID:        "Org1MSP",
+		IdentityPath: rootURL + "_/peers/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/Admin@org1.example.com-cert.pem",
+		KeyPath:      rootURL + "_/peers/crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/priv_sk",
 	}
 
 	signer, err := signerLib.NewSigner(signerConfig)
@@ -545,7 +552,7 @@ func (p *Proposer) start() {
 			// Nampkh: must feed empty txID
 			txID := ""
 
-			prop, txID, err := protoutil.CreateChaincodeProposalWithTxIDAndTransient(pcommon.HeaderType_ENDORSER_TRANSACTION, "vnpay-channel-2", invocation, creator, txID, tMap)
+			prop, txID, err := protoutil.CreateChaincodeProposalWithTxIDAndTransient(pcommon.HeaderType_ENDORSER_TRANSACTION, channelID, invocation, creator, txID, tMap)
 			if err != nil {
 				fmt.Println("[ERROR] propose: CreateChaincodeProposalWithTxIDAndTransient:", err)
 				return
@@ -563,26 +570,26 @@ func (p *Proposer) start() {
 				return
 			}
 
-			response1 := responses[0]
-			response2 := responses[1]
+			// response1 := responses[0]
+			// response2 := responses[1]
 			var proposalResponse *ProposalResponse
 
-			if response1.GetResponse().GetStatus() != response2.GetResponse().GetStatus() {
-				// response from 2 org is different => reverse succeed query
-				err := reverse(txID)
+			// if response1.GetResponse().GetStatus() != response2.GetResponse().GetStatus() {
+			// 	// response from 2 org is different => reverse succeed query
+			// 	err := reverse(txID)
 
-				proposalResponse = &ProposalResponse{
-					Error: errors.Errorf("Could not update at both two Org!, txID: %s, try to reverse! %s", txID, err),
-				}
-			} else {
+			// 	proposalResponse = &ProposalResponse{
+			// 		Error: errors.Errorf("Could not update at both two Org!, txID: %s, try to reverse! %s", txID, err),
+			// 	}
+			// } else {
 
-				proposalResponse = &ProposalResponse{
-					Prop:    prop,
-					Content: responses,
-					TxID:    txID,
-					Signer:  signer,
-				}
+			proposalResponse = &ProposalResponse{
+				Prop:    prop,
+				Content: responses,
+				TxID:    txID,
+				Signer:  signer,
 			}
+			// }
 
 			// for _, r := range responses {
 			// 	fmt.Println("=========================")
@@ -621,8 +628,8 @@ func (p *Proposer) propose(args [][]byte) (*ProposalResponse, error) {
 
 	var signerConfig = signerLib.Config{
 		MSPID:        p.peerMSPID,
-		IdentityPath: rootURL + "peers/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/signcerts/Admin@" + p.org + "-cert.pem",
-		KeyPath:      rootURL + "peers/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/keystore/priv_sk",
+		IdentityPath: rootURL + "_/peers/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/signcerts/Admin@" + p.org + "-cert.pem",
+		KeyPath:      rootURL + "_/peers/crypto-config/peerOrganizations/" + p.org + "/users/Admin@" + p.org + "/msp/keystore/priv_sk",
 	}
 
 	signer, err := signerLib.NewSigner(signerConfig)
@@ -720,8 +727,8 @@ func initSubmitterPool(poolSize int) error {
 			Id: i,
 		}
 
-		var ordererAddress string = targetOrderer + "." + targetOrg + ".example.com:7050"
-		var tlsRootCertFile string = "../orderers/crypto-config/ordererOrganizations/" + targetOrg + ".example.com/orderers/" + targetOrderer + "." + targetOrg + ".example.com/tls/ca.crt"
+		var ordererAddress string = "orderer0.example.com:7050"
+		var tlsRootCertFile string = "../_/orderers/crypto-config/ordererOrganizations/example.com/orderers/orderer0.example.com/tls/ca.crt"
 
 		err := submitter.connectToOrderer(ordererAddress, tlsRootCertFile)
 
@@ -806,8 +813,8 @@ func sendToSubmitter(proposalResponse ProposalResponse) error {
 
 func (s *Submitter) connectToOrderer(tartgetOrdererAddress string, tlsRootCertFile string) error {
 
-	clientKeyFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.key"
-	clientCertFile := "../peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.crt"
+	clientKeyFile := "../_/peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.key"
+	clientCertFile := "../_/peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/peers/" + targetPeer + "." + targetOrg + ".example.com/tls/server.crt"
 
 	clientConfig := comm.ClientConfig{}
 	clientConfig.Timeout = 30 * time.Second
@@ -835,7 +842,7 @@ func (s *Submitter) connectToOrderer(tartgetOrdererAddress string, tlsRootCertFi
 	}
 
 	secOpts := comm.SecureOptions{
-		UseTLS:            true,
+		UseTLS:            false,
 		RequireClientCert: true,
 	}
 
@@ -908,8 +915,8 @@ func initListenerPool(poolSize int) {
 		peerAddress = "peer0." + targetOrg + ".example.com"
 		signerConfig = signerLib.Config{
 			MSPID:        "O" + targetOrg[1:] + "MSP", // ex: Org1MSP
-			IdentityPath: rootURL + "peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/users/Admin@" + targetOrg + ".example.com/msp/signcerts/Admin@" + targetOrg + ".example.com-cert.pem",
-			KeyPath:      rootURL + "peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/users/Admin@" + targetOrg + ".example.com/msp/keystore/priv_sk",
+			IdentityPath: rootURL + "_/peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/users/Admin@" + targetOrg + ".example.com/msp/signcerts/Admin@" + targetOrg + ".example.com-cert.pem",
+			KeyPath:      rootURL + "_/peers/crypto-config/peerOrganizations/" + targetOrg + ".example.com/users/Admin@" + targetOrg + ".example.com/msp/keystore/priv_sk",
 		}
 
 		listener, err := initSubmissionListener(i, peerAddress, channelID, signerConfig)
@@ -1090,7 +1097,7 @@ func invokeHandler(res http.ResponseWriter, req *http.Request) {
 
 func reverse(txID string) error {
 
-	args := [][]byte{[]byte("reverse"), []byte(txID), []byte(txID)}
+	args := [][]byte{[]byte("reverse"), []byte(txID)}
 
 	responseChan := make(chan ProposalResponse)
 	id := strconv.Itoa(proposalResponseChannelID.Inc())

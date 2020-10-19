@@ -295,7 +295,7 @@ func (s *SmartContract) updateAccountService(APIstub shim.ChaincodeStubInterface
 
 func (s *SmartContract) reverse(APIstub shim.ChaincodeStubInterface, args []string) peer.Response {
 	if len(args) != 1 {
-		return shim.Error("Incorrect number of arguments, expecting 1: (1) txID")
+		return shim.Error(fmt.Sprintf("Incorrect number of arguments, expecting 1: (1) txID, received: %d", len(args)))
 	}
 
 	txID := args[0]
@@ -414,7 +414,7 @@ func main() {
 	// 	return
 	// }
 
-	// // Create a new Smart Contract
+	// Create a new Smart Contract
 	err := shim.Start(new(SmartContract))
 	if err != nil {
 		fmt.Printf("Error creating new Smart Contract: %s", err)
