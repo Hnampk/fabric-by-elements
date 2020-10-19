@@ -10,7 +10,9 @@ Các script dùng để start một cụm blockchain gồm 02 org:
 
 
 - Bước 1: Cài đặt file hosts ánh xạ địa chỉ các peers + orderer:
+
     Ví dụ:
+    
         10.22.7.235     orderer0.example.com
         10.22.7.235     peer0.org1.example.com
         10.22.7.235     peer1.org1.example.com
@@ -19,20 +21,26 @@ Các script dùng để start một cụm blockchain gồm 02 org:
         10.22.7.236     peer1.org2.example.com
 
 - Bước 2: Cập nhật địa chỉ orderer và org trong file .env
-    Ví dụ
+
+    Ví dụ:
+    
         ORDERER_ADDRESS=10.22.7.235:7050
         ORG1_IP=10.22.7.235
         ORG2_IP=10.22.7.236
 
-- Bước 3: với orderer solo mode, nếu gặp vấn đề phân giải IP, hardcode địa chỉ orderer trong file channel-artifacts/configtx.yaml. Ví dụ:
+- Bước 3: với orderer solo mode, nếu gặp vấn đề phân giải IP, hardcode địa chỉ orderer trong file channel-artifacts/configtx.yaml
 
-        OrdererEndpoints:
-            - orderer0.example.com:7050 
-        
-    =>  OrdererEndpoints:
-            - 10.22.7.235:7050
+    Ví dụ:
 
-- Bước 4: chạy lần lượt các script ở 02 server tương ứng với 02 org. Ví dụ: 
+            OrdererEndpoints:
+                - orderer0.example.com:7050 
+
+        =>  OrdererEndpoints:
+               - 10.22.7.235:7050
+
+- Bước 4: chạy lần lượt các script ở 02 server tương ứng với 02 org. 
+
+    Ví dụ: 
 
         - [235-org1] 0.clean.sh
         - [235-org1] 1.generate-certificates.sh
