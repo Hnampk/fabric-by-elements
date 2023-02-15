@@ -8,7 +8,7 @@ require (
 	github.com/fsouza/go-dockerclient v1.6.5
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-redis/redis/v8 v8.2.3
-	github.com/golang/protobuf v1.4.2
+	github.com/golang/protobuf v1.4.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.2.2
 	github.com/hashicorp/go-version v1.2.1 // indirect
 	github.com/hyperledger/fabric v2.1.1+incompatible
@@ -22,7 +22,7 @@ require (
 	github.com/onsi/gomega v1.10.2
 	github.com/orcaman/concurrent-map v0.0.0-20190826125027-8c72a8bb44f6
 	github.com/pkg/errors v0.9.1
-	github.com/prometheus/client_golang v1.7.1 // indirect
+	github.com/prometheus/client_golang v1.11.1 // indirect
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.7.1
